@@ -1,0 +1,56 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+
+# Build outputs
+dist/
+build/
+cdk.out/
+*.egg-info/
+
+# Environment variables
+.env
+frontend/.env
+.env.local
+.env.*.local
+cdk.context.json
+infrastructure/cdk.context.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# AWS
+.aws-sam/
+amplify/
+cdk.out/
+infrastructure/cdk.out/
+
+# Testing
+.coverage
+.pytest_cache/
+htmlcov/
+
+# TypeScript
+*.tsbuildinfo
+
