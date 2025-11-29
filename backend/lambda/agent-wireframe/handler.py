@@ -31,7 +31,8 @@ from shared.cv_utils import (
     classify_damage_types,
     detect_missing_shingles_cv,
     annotate_damage_with_ai,
-    merge_damage_areas
+    merge_damage_areas,
+    filter_large_damage_areas
 )
 from ai_client import AIClient
 
@@ -134,6 +135,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         print(f"[Agent1] Detected {len(damage_areas)} structural issues for {photo_id}")
         
+        # Filter out extremely large regions (false positives)
+        damage_areas = filter_large_damage_areas(damage_areas, image_width, image_height)
+
         # Add grid coordinates to damage areas
         for area in damage_areas:
             bbox = area.get('bbox', [])

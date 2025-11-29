@@ -4,6 +4,7 @@ Lambda handler for Agent 3 - Overlap analysis and overlay generation
 import json
 import os
 import time
+import io
 from typing import Dict, Any, List
 import sys
 
@@ -24,7 +25,8 @@ from shared.models import PhotoMetadata
 from shared.cv_utils import (
     calculate_overlap,
     count_damage_instances,
-    generate_overlay
+    generate_overlay,
+    filter_large_damage_areas
 )
 
 
@@ -76,6 +78,20 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         
         agent1_damage_areas = agent1_results.get('damage_areas', [])
         agent2_damage_areas = agent2_results.get('damage_areas', [])
+        
+        print(f"[Agent3] Downloading original image {s3_key} for {photo_id}")
+        original_image_bytes = download_image(bucket_name, s3_key, region)
+        if not original_image_bytes:
+            return {
+                'statusCode': 404,
+                'body': json.dumps({'error': 'Original image not found in S3'})
+            }
+        from PIL import Image
+        img = Image.open(io.BytesIO(original_image_bytes))
+        image_width, image_height = img.size
+        
+        agent1_damage_areas = filter_large_damage_areas(agent1_damage_areas, image_width, image_height)
+        agent2_damage_areas = filter_large_damage_areas(agent2_damage_areas, image_width, image_height)
         
         # Phase 1: Calculate overlaps
         overlap_areas = []
@@ -162,13 +178,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         damage_counts = count_damage_instances(overlap_areas)
         
         # Phase 3: Generate overlay
-        print(f"[Agent3] Downloading original image {s3_key} for {photo_id}")
-        original_image_bytes = download_image(bucket_name, s3_key, region)
-        if not original_image_bytes:
-            return {
-                'statusCode': 404,
-                'body': json.dumps({'error': 'Original image not found in S3'})
-            }
+        overlap_areas = filter_large_damage_areas(overlap_areas, image_width, image_height)
         
         confidences = [area.get('confidence', 0.5) for area in overlap_areas]
         damage_types = [area.get('damage_type', 'unknown') for area in overlap_areas]

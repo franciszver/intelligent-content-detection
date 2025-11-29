@@ -28,7 +28,8 @@ from shared.cv_utils import (
     detect_discoloration,
     detect_discoloration_cv,
     annotate_damage_with_ai,
-    merge_damage_areas
+    merge_damage_areas,
+    filter_large_damage_areas
 )
 from ai_client import AIClient
 
@@ -112,6 +113,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             task="discoloration, algae, moisture staining"
         )
         print(f"Discoloration detection (cv+ai) took {(time.time() - detection_start) * 1000:.2f}ms")
+
+        damage_areas = filter_large_damage_areas(damage_areas, image_width, image_height, max_fraction=0.5)
         
         # Add grid coordinates to damage areas
         for area in damage_areas:

@@ -609,6 +609,38 @@ def merge_damage_areas(primary: List[Dict[str, Any]],
     return merged
 
 
+def filter_large_damage_areas(damage_areas: List[Dict[str, Any]],
+                              image_width: int,
+                              image_height: int,
+                              max_fraction: float = 0.45) -> List[Dict[str, Any]]:
+    """
+    Remove detections that cover an excessive portion of the frame (likely false positives).
+
+    If filtering would remove all detections, fall back to the original list.
+    """
+    if image_width <= 0 or image_height <= 0:
+        return damage_areas
+
+    image_area = image_width * image_height
+    filtered: List[Dict[str, Any]] = []
+
+    for area in damage_areas:
+        bbox = area.get("bbox")
+        if not bbox or len(bbox) != 4:
+            continue
+        x1, y1, x2, y2 = bbox
+        area_w = max(0, x2 - x1)
+        area_h = max(0, y2 - y1)
+        bbox_area = area_w * area_h
+        fraction = bbox_area / float(image_area) if image_area else 0.0
+
+        if len(damage_areas) > 1 and fraction > max_fraction:
+            continue
+        filtered.append(area)
+
+    return filtered if filtered else damage_areas
+
+
 def count_damage_instances(damage_areas: List[Dict[str, Any]]) -> Dict[str, int]:
     """
     Count damage instances by type
