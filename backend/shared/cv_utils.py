@@ -36,6 +36,182 @@ def _ensure_numpy_available() -> None:
         )
 
 
+def _clamp_bbox(bbox: List[int], width: int, height: int) -> List[int]:
+    """Clamp a bounding box to stay within image boundaries."""
+    x1, y1, x2, y2 = bbox
+    x1 = max(0, min(width - 1, x1))
+    y1 = max(0, min(height - 1, y1))
+    x2 = max(0, min(width, x2))
+    y2 = max(0, min(height, y2))
+    if x2 <= x1:
+        x2 = x1 + 1
+    if y2 <= y1:
+        y2 = y1 + 1
+    return [x1, y1, x2, y2]
+
+
+def _chunk_damage_areas(damage_areas: List[Dict[str, Any]], size: int = 5) -> List[List[Dict[str, Any]]]:
+    """Split damage areas into smaller chunks for AI prompts."""
+    return [damage_areas[i:i + size] for i in range(0, len(damage_areas), size)]
+
+
+def detect_missing_shingles_cv(image_bytes: bytes, min_area: int = 900) -> List[Dict[str, Any]]:
+    """
+    Detect missing or mismatched shingles using classical CV routines.
+    """
+    _ensure_cv2_available()
+    _ensure_numpy_available()
+
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        return []
+
+    height, width = img.shape[:2]
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l_channel, _, _ = cv2.split(lab)
+
+    blur = cv2.GaussianBlur(l_channel, (5, 5), 0)
+    median = cv2.medianBlur(l_channel, 21)
+    diff = cv2.absdiff(blur, median)
+    if diff.max() > 0:
+        _, diff_mask = cv2.threshold(diff, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    else:
+        _, diff_mask = cv2.threshold(diff, 8, 255, cv2.THRESH_BINARY)
+
+    edges = cv2.Canny(blur, 40, 120)
+
+    color_blur = cv2.GaussianBlur(img, (9, 9), 0)
+    color_diff = cv2.absdiff(img, color_blur)
+    color_gray = cv2.cvtColor(color_diff, cv2.COLOR_BGR2GRAY)
+    _, color_mask = cv2.threshold(color_gray, 15, 255, cv2.THRESH_BINARY)
+
+    combined = cv2.bitwise_or(diff_mask, edges)
+    combined = cv2.bitwise_or(combined, color_mask)
+
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+    combined = cv2.morphologyEx(combined, cv2.MORPH_CLOSE, kernel, iterations=2)
+    combined = cv2.morphologyEx(combined, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    contours, _ = cv2.findContours(combined, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    results: List[Dict[str, Any]] = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < min_area:
+            continue
+
+        x, y, w, h = cv2.boundingRect(contour)
+        aspect_ratio = w / float(h) if h > 0 else 0
+        if aspect_ratio < 0.6 or aspect_ratio > 6:
+            continue
+
+        bbox = _clamp_bbox([x, y, x + w, y + h], width, height)
+        confidence = float(min(0.95, 0.4 + (area / (width * height)) * 3))
+        results.append({
+            "bbox": bbox,
+            "confidence": confidence,
+            "damage_type": "missing_shingles",
+            "source": "cv"
+        })
+
+    return results
+
+
+def detect_discoloration_cv(image_bytes: bytes, min_area: int = 1200) -> List[Dict[str, Any]]:
+    """Detect discoloration or staining using LAB color analysis."""
+    _ensure_cv2_available()
+    _ensure_numpy_available()
+
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        return []
+
+    height, width = img.shape[:2]
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l_channel, a_channel, _ = cv2.split(lab)
+
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    l_enhanced = clahe.apply(l_channel)
+
+    blur = cv2.GaussianBlur(l_enhanced, (7, 7), 0)
+    adaptive = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C,
+                                     cv2.THRESH_BINARY_INV, 33, 5)
+
+    texture = cv2.Laplacian(a_channel, cv2.CV_64F)
+    texture = cv2.convertScaleAbs(texture)
+    _, texture_mask = cv2.threshold(texture, 10, 255, cv2.THRESH_BINARY)
+
+    mask = cv2.bitwise_or(adaptive, texture_mask)
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    results: List[Dict[str, Any]] = []
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < min_area:
+            continue
+        x, y, w, h = cv2.boundingRect(contour)
+        bbox = _clamp_bbox([x, y, x + w, y + h], width, height)
+        confidence = float(min(0.9, 0.3 + (area / (width * height)) * 4))
+        results.append({
+            "bbox": bbox,
+            "confidence": confidence,
+            "damage_type": "discoloration",
+            "discoloration_severity": min(1.0, 0.4 + confidence),
+            "source": "cv"
+        })
+    return results
+
+
+def annotate_damage_with_ai(image_bytes: bytes,
+                            damage_areas: List[Dict[str, Any]],
+                            ai_client: Optional[Any],
+                            task: str = "missing_shingles") -> List[Dict[str, Any]]:
+    """Use the AI client to classify/label detected damage areas."""
+    if not ai_client or not damage_areas:
+        return damage_areas
+
+    prompt_template = """You are an expert roof inspector. Given the bounding boxes below,
+classify each area and assign a severity.
+
+Task: {task}
+Bounding boxes:
+{boxes}
+
+Return ONLY JSON:
+{{
+  \"classifications\": [
+    {{
+      \"bbox\": [x1, y1, x2, y2],
+      \"damage_type\": \"missing_shingles|cracks|hail_impact|water_stains|unknown\",
+      \"severity\": \"minor|moderate|severe\"
+    }}
+  ]
+}}
+"""
+
+    updated = {tuple(area["bbox"]): area for area in damage_areas if "bbox" in area}
+
+    for chunk in _chunk_damage_areas(damage_areas):
+        boxes_json = json.dumps([area["bbox"] for area in chunk])
+        prompt = prompt_template.format(task=task, boxes=boxes_json)
+        result, provider = ai_client.detect_content(image_bytes, prompt)
+        if not result or "classifications" not in result:
+            continue
+
+        for entry in result["classifications"]:
+            bbox_key = tuple(entry.get("bbox", []))
+            if bbox_key in updated:
+                updated_area = updated[bbox_key]
+                updated_area["damage_type"] = entry.get("damage_type", updated_area.get("damage_type", "unknown"))
+                updated_area["severity"] = entry.get("severity", updated_area.get("severity", "moderate"))
+                updated_area["ai_provider"] = provider
+
+    return list(updated.values())
+
+
 def segment_roof_zones(image_bytes: bytes, ai_client: Optional[Any] = None) -> List[Dict[str, Any]]:
     """
     Use AI to segment roof into zones (shingles, vents, skylights, gutters, edges)
@@ -400,6 +576,39 @@ def calculate_overlap(bbox1: List[int], bbox2: List[int]) -> float:
     return intersection / union
 
 
+def merge_damage_areas(primary: List[Dict[str, Any]],
+                       secondary: List[Dict[str, Any]],
+                       iou_threshold: float = 0.4) -> List[Dict[str, Any]]:
+    """
+    Merge two lists of damage areas, preferring higher-confidence entries when overlapping.
+    """
+    merged: List[Dict[str, Any]] = [dict(area) for area in primary]
+
+    for candidate in secondary:
+        bbox = candidate.get("bbox")
+        if not bbox or len(bbox) != 4:
+            continue
+
+        best_match = None
+        best_iou = 0.0
+        for existing in merged:
+            existing_bbox = existing.get("bbox", [])
+            if len(existing_bbox) != 4:
+                continue
+            iou = calculate_overlap(existing_bbox, bbox)
+            if iou > best_iou:
+                best_iou = iou
+                best_match = existing
+
+        if best_match and best_iou >= iou_threshold:
+            if candidate.get("confidence", 0) > best_match.get("confidence", 0):
+                best_match.update(candidate)
+        else:
+            merged.append(candidate)
+
+    return merged
+
+
 def count_damage_instances(damage_areas: List[Dict[str, Any]]) -> Dict[str, int]:
     """
     Count damage instances by type
@@ -437,10 +646,10 @@ def generate_overlay(
     Returns:
         Overlay image bytes (PNG with transparency)
     """
-    # Load original image
+    # Load original image (used for positioning only)
     img = Image.open(io.BytesIO(original_image_bytes)).convert("RGBA")
     
-    # Create overlay layer
+    # Create transparent overlay layer (no base image)
     overlay = Image.new("RGBA", img.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
     
@@ -485,8 +694,8 @@ def generate_overlay(
         draw.rectangle(text_bbox, fill=(0, 0, 0, 200))
         draw.text((x1, y1), label, fill=(255, 255, 255, 255), font=font)
     
-    # Composite overlay onto original
-    result = Image.alpha_composite(img, overlay)
+    # Use overlay layer as the export target (no base image)
+    result = overlay.copy()
     
     # Add damage counts legend if provided
     if counts:

@@ -25,7 +25,10 @@ from shared.models import PhotoMetadata
 from shared.image_utils import bbox_to_grid_coords, validate_image
 from shared.cv_utils import (
     enhance_colors,
-    detect_discoloration
+    detect_discoloration,
+    detect_discoloration_cv,
+    annotate_damage_with_ai,
+    merge_damage_areas
 )
 from ai_client import AIClient
 
@@ -97,10 +100,18 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         enhanced_image_base64 = base64.b64encode(enhanced_image_bytes).decode('utf-8')
         print(f"Color enhancement took {(time.time() - enhancement_start) * 1000:.2f}ms")
         
-        # Phase 2: Discoloration detection
+        # Phase 2: Discoloration detection (CV + AI)
         detection_start = time.time()
-        damage_areas = detect_discoloration(enhanced_image_bytes, ai_client)
-        print(f"Discoloration detection took {(time.time() - detection_start) * 1000:.2f}ms")
+        cv_damage = detect_discoloration_cv(enhanced_image_bytes)
+        ai_damage = detect_discoloration(enhanced_image_bytes, ai_client)
+        damage_areas = merge_damage_areas(cv_damage, ai_damage, iou_threshold=0.35)
+        damage_areas = annotate_damage_with_ai(
+            image_bytes,
+            damage_areas,
+            ai_client,
+            task="discoloration, algae, moisture staining"
+        )
+        print(f"Discoloration detection (cv+ai) took {(time.time() - detection_start) * 1000:.2f}ms")
         
         # Add grid coordinates to damage areas
         for area in damage_areas:

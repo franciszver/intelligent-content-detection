@@ -16,7 +16,7 @@ const mockImageOnError = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
-  
+
   // Mock canvas context
   HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
     drawImage: mockDrawImage,
@@ -136,7 +136,7 @@ describe('DamageVisualization', () => {
     await waitFor(() => {
       expect(mockDrawImage).toHaveBeenCalled();
     }, { timeout: 1000 });
-    
+
     // Verify bounding boxes were drawn
     expect(mockStrokeRect).toHaveBeenCalled();
   });

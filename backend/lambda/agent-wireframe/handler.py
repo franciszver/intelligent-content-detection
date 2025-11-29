@@ -28,7 +28,10 @@ from shared.cv_utils import (
     segment_roof_zones,
     generate_wireframe,
     detect_disjointed_lines,
-    classify_damage_types
+    classify_damage_types,
+    detect_missing_shingles_cv,
+    annotate_damage_with_ai,
+    merge_damage_areas
 )
 from ai_client import AIClient
 
@@ -110,11 +113,24 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         damage_areas = detect_disjointed_lines(wireframe_bytes)
         print(f"Disjointed line detection took {(time.time() - detection_start) * 1000:.2f}ms")
         
-        # Phase 4: Classify damage types
+        # Phase 4: Run CV-based missing shingle detection on the raw image
+        cv_detection_start = time.time()
+        cv_damage = detect_missing_shingles_cv(image_bytes)
+        if cv_damage:
+            damage_areas = merge_damage_areas(damage_areas, cv_damage, iou_threshold=0.35)
+        print(f"CV missing shingle detection took {(time.time() - cv_detection_start) * 1000:.2f}ms")
+
+        # Phase 5: Classify/annotate via AI
         if damage_areas:
             classification_start = time.time()
             damage_areas = classify_damage_types(image_bytes, damage_areas, ai_client)
-            print(f"Damage classification took {(time.time() - classification_start) * 1000:.2f}ms")
+            damage_areas = annotate_damage_with_ai(
+                image_bytes,
+                damage_areas,
+                ai_client,
+                task="missing shingles, torn shingles, uplifted shingles"
+            )
+            print(f"Damage classification + AI annotation took {(time.time() - classification_start) * 1000:.2f}ms")
 
         print(f"[Agent1] Detected {len(damage_areas)} structural issues for {photo_id}")
         

@@ -30,6 +30,10 @@ class DamageArea(BaseModel):
     damage_type: Optional[str] = Field(None, description="Damage type: missing_shingles, cracks, hail_impact, water_stains, sagging, discoloration")
     severity: Optional[str] = Field(None, description="Severity: minor, moderate, severe")
     discoloration_severity: Optional[float] = Field(None, ge=0.0, le=1.0, description="Discoloration severity (0.0-1.0)")
+    source: Optional[str] = Field(None, description="Origin of detection (cv, ai, merged)")
+    ai_provider: Optional[str] = Field(None, description="AI provider used for annotation")
+    zone_id: Optional[str] = Field(None, description="Associated roof zone id")
+    notes: Optional[str] = Field(None, description="Additional inspector notes")
 
 
 class WireframeAnalysis(BaseModel):

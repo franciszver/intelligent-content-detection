@@ -14,6 +14,24 @@ export interface Detection {
   confidence: number;
   bbox?: number[];
   severity?: string;
+  source?: string;
+  ai_provider?: string;
+}
+
+export interface DamageArea {
+  bbox: number[];
+  grid_coords?: { row: number; col: number };
+  confidence: number;
+  damage_type?: string;
+  severity?: string;
+  discoloration_severity?: number;
+  source?: string;
+  ai_provider?: string;
+  zone_id?: string;
+  notes?: string;
+  agent1_confidence?: number;
+  agent2_confidence?: number;
+  overlap_score?: number;
 }
 
 export interface Material {
@@ -43,39 +61,17 @@ export interface PhotoMetadata {
       bbox: number[];
       confidence?: number;
     }>;
-    damage_areas?: Array<{
-      bbox: number[];
-      grid_coords?: { row: number; col: number };
-      confidence: number;
-      damage_type?: string;
-      severity?: string;
-    }>;
+    damage_areas?: DamageArea[];
   };
   agent2_results?: {
     enhanced_image_base64?: string;
-    damage_areas?: Array<{
-      bbox: number[];
-      grid_coords?: { row: number; col: number };
-      confidence: number;
-      damage_type?: string;
-      severity?: string;
-      discoloration_severity?: number;
-    }>;
+    damage_areas?: DamageArea[];
     discoloration_severity?: number;
   };
   agent3_results?: {
     overlay_s3_key?: string;
     report_s3_key?: string;
-    overlap_areas?: Array<{
-      bbox: number[];
-      grid_coords?: { row: number; col: number };
-      confidence: number;
-      damage_type?: string;
-      severity?: string;
-      agent1_confidence?: number;
-      agent2_confidence?: number;
-      overlap_score?: number;
-    }>;
+    overlap_areas?: DamageArea[];
     damage_counts?: Record<string, number>;
     damage_summary?: {
       total_damage_areas: number;
