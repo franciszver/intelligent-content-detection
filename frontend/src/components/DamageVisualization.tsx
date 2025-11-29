@@ -15,17 +15,14 @@ export function DamageVisualization({ imageUrl, detections = [], overlayUrl }: D
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [imageLoaded, setImageLoaded] = useState(false);
-  const [useOverlay, setUseOverlay] = useState(false);
+  const [overlayLoaded, setOverlayLoaded] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(false);
 
   useEffect(() => {
-    // If overlay URL is provided, use it directly
-    if (overlayUrl) {
-      setUseOverlay(true);
-      setImageLoaded(true);
-      return;
-    }
+    setOverlayLoaded(false);
+  }, [overlayUrl]);
 
-    // Otherwise, draw detections on canvas
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -79,43 +76,53 @@ export function DamageVisualization({ imageUrl, detections = [], overlayUrl }: D
     };
 
     img.src = imageUrl;
-  }, [imageUrl, detections, overlayUrl]);
-
-  // If overlay is available, display it directly
-  if (useOverlay && overlayUrl) {
-    return (
-      <div className="relative">
-        <img
-          src={overlayUrl}
-          alt="Damage Overlay"
-          className="max-w-full h-auto border border-gray-200 rounded-lg"
-          onLoad={() => setImageLoaded(true)}
-        />
-        {!imageLoaded && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-100 rounded-lg">
-            <p className="text-gray-500">Loading overlay...</p>
-          </div>
-        )}
-      </div>
-    );
-  }
+  }, [imageUrl, detections]);
 
   return (
-    <div className="relative">
-      <canvas
-        ref={canvasRef}
-        className="max-w-full h-auto border border-gray-200 rounded-lg"
-        style={{ display: imageLoaded ? 'block' : 'none' }}
-      />
-      {!imageLoaded && (
-        <div className="w-full h-64 bg-gray-100 rounded-lg flex items-center justify-center">
-          <p className="text-gray-500">Loading image...</p>
-        </div>
-      )}
-      {detections.length === 0 && imageLoaded && !useOverlay && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-100 bg-opacity-50 rounded-lg">
-          <p className="text-gray-600">No damage detected</p>
-        </div>
+    <div className="space-y-3">
+      <div className="relative inline-block w-full">
+        <canvas
+          ref={canvasRef}
+          className="max-w-full h-auto border border-gray-200 rounded-lg"
+          style={{ display: imageLoaded ? 'block' : 'none' }}
+        />
+        {!imageLoaded && (
+          <div className="w-full h-64 bg-gray-100 rounded-lg flex items-center justify-center">
+            <p className="text-gray-500">Loading image...</p>
+          </div>
+        )}
+
+        {detections.length === 0 && imageLoaded && (
+          <div className="absolute inset-0 flex items-center justify-center bg-gray-100 bg-opacity-50 rounded-lg pointer-events-none">
+            <p className="text-gray-600">No damage detected</p>
+          </div>
+        )}
+
+        {overlayUrl && showOverlay && (
+          <>
+            {!overlayLoaded && (
+              <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-20 rounded-lg pointer-events-none">
+                <p className="text-white text-sm">Loading overlay...</p>
+              </div>
+            )}
+            <img
+              src={overlayUrl}
+              alt="Damage Overlay"
+              className="absolute inset-0 w-full h-full object-contain rounded-lg pointer-events-none opacity-65 mix-blend-multiply"
+              onLoad={() => setOverlayLoaded(true)}
+            />
+          </>
+        )}
+      </div>
+
+      {overlayUrl && (
+        <button
+          type="button"
+          onClick={() => setShowOverlay((prev) => !prev)}
+          className="text-sm px-3 py-1 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 transition"
+        >
+          {showOverlay ? 'Hide overlay' : 'Show overlay'}
+        </button>
       )}
     </div>
   );

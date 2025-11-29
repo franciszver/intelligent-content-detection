@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { DamageVisualization } from '../DamageVisualization';
 
 // Mock canvas context
@@ -55,13 +56,21 @@ describe('DamageVisualization', () => {
     expect(screen.getByText(/Loading image/i)).toBeInTheDocument();
   });
 
-  it('should display overlay image when overlayUrl is provided', async () => {
+  it('should allow toggling overlay image when overlayUrl is provided', async () => {
     const overlayUrl = 'https://example.com/overlay.png';
+    const user = userEvent.setup();
     render(<DamageVisualization imageUrl="test.jpg" overlayUrl={overlayUrl} />);
 
-    const img = screen.getByAltText('Damage Overlay');
+    // Overlay hidden by default
+    expect(screen.queryByAltText('Damage Overlay')).not.toBeInTheDocument();
+
+    const toggleButton = screen.getByRole('button', { name: /show overlay/i });
+    await user.click(toggleButton);
+
+    const img = await screen.findByAltText('Damage Overlay');
     expect(img).toBeInTheDocument();
     expect(img).toHaveAttribute('src', overlayUrl);
+    expect(toggleButton).toHaveTextContent(/hide overlay/i);
   });
 
   it('should render canvas with detections', async () => {
@@ -132,7 +141,7 @@ describe('DamageVisualization', () => {
     expect(mockStrokeRect).toHaveBeenCalled();
   });
 
-  it('should prioritize overlayUrl over detections', () => {
+  it('should keep detections visible even when overlay is toggled on', async () => {
     const overlayUrl = 'https://example.com/overlay.png';
     const detections = [
       {
@@ -143,6 +152,7 @@ describe('DamageVisualization', () => {
       },
     ];
 
+    const user = userEvent.setup();
     render(
       <DamageVisualization
         imageUrl="test.jpg"
@@ -151,9 +161,15 @@ describe('DamageVisualization', () => {
       />
     );
 
-    const img = screen.getByAltText('Damage Overlay');
-    expect(img).toBeInTheDocument();
-    expect(img).toHaveAttribute('src', overlayUrl);
+    await waitFor(() => {
+      expect(mockDrawImage).toHaveBeenCalled();
+    }, { timeout: 1000 });
+
+    const toggleButton = screen.getByRole('button', { name: /show overlay/i });
+    await user.click(toggleButton);
+
+    expect(await screen.findByAltText('Damage Overlay')).toBeInTheDocument();
+    expect(mockStrokeRect).toHaveBeenCalled(); // bounding boxes still drawn
   });
 });
 
