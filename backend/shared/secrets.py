@@ -71,11 +71,13 @@ def get_secret(secret_name: str, region: str = 'us-east-2') -> Optional[str]:
 def get_openai_key() -> Optional[str]:
     """Get OpenAI API key from Secrets Manager"""
     secret_name = os.environ.get('OPENAI_SECRET_NAME', 'openai-api-key')
-    return get_secret(secret_name)
+    region = os.environ.get('REGION', 'us-east-2')
+    return get_secret(secret_name, region)
 
 
 def get_openrouter_key() -> Optional[str]:
     """Get OpenRouter API key from Secrets Manager"""
     secret_name = os.environ.get('OPENROUTER_SECRET_NAME', 'openrouter-api-key')
-    return get_secret(secret_name)
+    region = os.environ.get('REGION', 'us-east-2')
+    return get_secret(secret_name, region)
 

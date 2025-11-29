@@ -48,6 +48,65 @@ def generate_presigned_url(
         return None
 
 
+def upload_file_to_s3(
+    bucket_name: str,
+    object_key: str,
+    file_data: bytes,
+    content_type: str = 'image/jpeg',
+    region: str = 'us-east-2'
+) -> bool:
+    """
+    Upload file directly to S3 (for proxying through API)
+    
+    Args:
+        bucket_name: S3 bucket name
+        object_key: S3 object key
+        file_data: File bytes
+        content_type: Content type
+        region: AWS region
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        s3_client = get_s3_client(region)
+        s3_client.put_object(
+            Bucket=bucket_name,
+            Key=object_key,
+            Body=file_data,
+            ContentType=content_type
+        )
+        return True
+    except ClientError as e:
+        print(f"Error uploading file to S3: {e}")
+        return False
+
+
+def generate_presigned_get_url(
+    bucket_name: str,
+    object_key: str,
+    expiration: int = 3600,
+    region: str = 'us-east-2'
+) -> Optional[str]:
+    """
+    Generate a presigned URL for downloading an object from S3
+    """
+    try:
+        s3_client = get_s3_client(region)
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={
+                'Bucket': bucket_name,
+                'Key': object_key,
+            },
+            ExpiresIn=expiration
+        )
+        return url
+    except ClientError as e:
+        print(f"Error generating presigned download URL: {e}")
+        return None
+
+
 def download_image(bucket_name: str, object_key: str, region: str = 'us-east-2') -> Optional[bytes]:
     """
     Download image from S3

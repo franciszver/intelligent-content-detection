@@ -9,8 +9,8 @@ from datetime import datetime
 from typing import Dict, Any
 import sys
 
-# Add shared directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
+# Add Lambda root directory to path (where shared module is located)
+sys.path.insert(0, os.path.dirname(__file__))
 
 from shared.s3 import download_image
 from shared.dynamodb import get_metadata, put_metadata
@@ -77,12 +77,25 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     photo_id = filename.replace('.jpg', '').replace('.jpeg', '').replace('.png', '')
         else:
             # API Gateway trigger
+            # Get photo_id from path parameters first (from /photos/{photoId}/detect)
+            photo_id = None
+            if event.get('pathParameters') and event['pathParameters'].get('photoId'):
+                photo_id = event['pathParameters']['photoId']
+            
+            # Fallback to body if not in path parameters
+            if not photo_id:
+                if isinstance(event.get('body'), str):
+                    body = json.loads(event['body'])
+                else:
+                    body = event.get('body', {})
+                photo_id = body.get('photo_id')
+            
+            # Get s3_key from body if provided
+            s3_key = None
             if isinstance(event.get('body'), str):
                 body = json.loads(event['body'])
             else:
                 body = event.get('body', {})
-            
-            photo_id = body.get('photo_id')
             s3_key = body.get('s3_key')
             
             # If s3_key not provided, get from metadata
@@ -98,7 +111,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         # Download image from S3
+        download_start = time.time()
         image_bytes = download_image(bucket_name, s3_key, region)
+        print(f"S3 download took {(time.time() - download_start) * 1000:.2f}ms")
         if not image_bytes:
             # Update metadata with failed status
             metadata = get_metadata(table_name, photo_id, region)
@@ -112,7 +127,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         # Validate image
+        validation_start = time.time()
         is_valid, error_msg = validate_image(image_bytes)
+        print(f"Image validation took {(time.time() - validation_start) * 1000:.2f}ms")
         if not is_valid:
             metadata = get_metadata(table_name, photo_id, region)
             if metadata:
@@ -125,7 +142,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         # Resize image if needed (optimize for AI processing)
+        resize_start = time.time()
         image_bytes, was_resized = resize_image_if_needed(image_bytes, max_width=2048, max_height=2048)
+        print(f"Image resize took {(time.time() - resize_start) * 1000:.2f}ms (resized: {was_resized})")
         
         # Update status to processing
         metadata = get_metadata(table_name, photo_id, region)
@@ -134,11 +153,15 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             put_metadata(table_name, metadata, region)
         
         # Initialize AI client and parser
+        init_start = time.time()
         ai_client = AIClient()
         parser = ResponseParser()
+        print(f"AI client initialization took {(time.time() - init_start) * 1000:.2f}ms")
         
         # Call AI service
+        ai_start = time.time()
         result, provider = ai_client.detect_content(image_bytes, COMBINED_PROMPT)
+        print(f"Total AI detection took {(time.time() - ai_start) * 1000:.2f}ms using {provider}")
         
         if not result:
             # Update metadata with failed status
@@ -152,15 +175,18 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             }
         
         # Parse and validate response
+        parse_start = time.time()
         if not parser.validate_response(result):
             print(f"Warning: Invalid response structure from {provider}")
         
         parsed_result = parser.parse_response(result)
+        print(f"Response parsing took {(time.time() - parse_start) * 1000:.2f}ms")
         
         # Calculate processing time
         processing_time_ms = int((time.time() - start_time) * 1000)
         
         # Update metadata with results
+        db_start = time.time()
         if metadata:
             metadata.status = 'completed'
             metadata.detections = parsed_result['detections']
@@ -168,6 +194,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             metadata.processing_time_ms = processing_time_ms
             metadata.ai_provider = provider
             put_metadata(table_name, metadata, region)
+            print(f"DynamoDB update took {(time.time() - db_start) * 1000:.2f}ms")
         else:
             # Create new metadata if not found
             metadata = PhotoMetadata(

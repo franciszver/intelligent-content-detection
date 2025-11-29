@@ -5,12 +5,28 @@ Retrieves photo metadata from DynamoDB
 import json
 import os
 from typing import Dict, Any
+from decimal import Decimal
 import sys
 
-# Add shared directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
+# Add Lambda root directory to path (where shared module is located)
+sys.path.insert(0, os.path.dirname(__file__))
 
 from shared.dynamodb import get_metadata
+from shared.s3 import generate_presigned_get_url
+
+
+def convert_decimals(obj: Any) -> Any:
+    """Recursively convert Decimal types to float/int for JSON serialization"""
+    if isinstance(obj, Decimal):
+        # Convert Decimal to float (or int if it's a whole number)
+        if obj % 1 == 0:
+            return int(obj)
+        return float(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_decimals(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_decimals(item) for item in obj]
+    return obj
 
 
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
@@ -37,6 +53,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         # Get environment variables
         table_name = os.environ.get('DYNAMODB_TABLE_NAME')
         region = os.environ.get('REGION', 'us-east-2')
+        bucket_name = os.environ.get('S3_BUCKET_NAME')
         
         if not table_name:
             return {
@@ -72,14 +89,21 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 'body': json.dumps({'error': 'Photo not found'})
             }
         
-        # Convert to response format
+        # Convert to response format - use model_dump() to get dict representation
+        # This ensures we get the actual values, not Pydantic model instances
         response_data = {
             'photo_id': metadata.photo_id,
             'timestamp': metadata.timestamp,
             's3_key': metadata.s3_key,
             'status': metadata.status,
+            'workflow_status': metadata.workflow_status or metadata.status,
             'detections': metadata.detections,
             'materials': metadata.materials,
+            'agent1_results': metadata.agent1_results,
+            'agent2_results': metadata.agent2_results,
+            'agent3_results': metadata.agent3_results,
+            'overlay_s3_key': metadata.overlay_s3_key,
+            'report_s3_key': metadata.report_s3_key,
         }
         
         if metadata.user_id:
@@ -88,6 +112,20 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             response_data['processing_time_ms'] = metadata.processing_time_ms
         if metadata.ai_provider:
             response_data['ai_provider'] = metadata.ai_provider
+        
+        # Generate presigned URLs for overlay/report if available
+        if bucket_name and metadata.overlay_s3_key:
+            overlay_url = generate_presigned_get_url(bucket_name, metadata.overlay_s3_key, region=region)
+            if overlay_url:
+                response_data['overlay_url'] = overlay_url
+        if bucket_name and metadata.report_s3_key:
+            report_url = generate_presigned_get_url(bucket_name, metadata.report_s3_key, region=region)
+            if report_url:
+                response_data['report_url'] = report_url
+        
+        # Convert any Decimal types to float/int for JSON serialization
+        # This must be done AFTER all data is added to response_data
+        response_data = convert_decimals(response_data)
         
         return {
             'statusCode': 200,

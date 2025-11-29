@@ -5,7 +5,7 @@ import os
 import boto3
 from botocore.exceptions import ClientError
 from typing import Optional, Dict, Any
-from backend.shared.models import PhotoMetadata
+from .models import PhotoMetadata
 
 
 def get_dynamodb_client(region: str = 'us-east-2'):

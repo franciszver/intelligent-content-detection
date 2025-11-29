@@ -7,6 +7,7 @@ import { CONFIG } from '../config';
 export class StorageStack extends cdk.Stack {
   public readonly photosBucket: s3.Bucket;
   public readonly metadataTable: dynamodb.Table;
+  public readonly websocketTable: dynamodb.Table;
 
   constructor(scope: Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, {
@@ -25,9 +26,14 @@ export class StorageStack extends cdk.Stack {
       cors: [
         {
           allowedOrigins: ['*'], // Will be restricted to Amplify domain later
-          allowedMethods: [s3.HttpMethods.GET, s3.HttpMethods.PUT, s3.HttpMethods.POST],
+          allowedMethods: [
+            s3.HttpMethods.GET,
+            s3.HttpMethods.PUT,
+            s3.HttpMethods.POST,
+            s3.HttpMethods.HEAD,
+          ],
           allowedHeaders: ['*'],
-          exposedHeaders: ['ETag'],
+          exposedHeaders: ['ETag', 'x-amz-server-side-encryption', 'x-amz-request-id'],
           maxAge: 3000,
         },
       ],
@@ -72,6 +78,32 @@ export class StorageStack extends cdk.Stack {
       },
     });
 
+    // DynamoDB table for websocket subscriptions
+    this.websocketTable = new dynamodb.Table(this, 'WebsocketSubscriptions', {
+      tableName: `${CONFIG.PROJECT_NAME}-websocket-subscriptions`,
+      partitionKey: {
+        name: 'photo_id',
+        type: dynamodb.AttributeType.STRING,
+      },
+      sortKey: {
+        name: 'connection_id',
+        type: dynamodb.AttributeType.STRING,
+      },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      removalPolicy: cdk.RemovalPolicy.DESTROY,
+      encryption: dynamodb.TableEncryption.AWS_MANAGED,
+      timeToLiveAttribute: 'ttl',
+    });
+
+    this.websocketTable.addGlobalSecondaryIndex({
+      indexName: 'connection-index',
+      partitionKey: {
+        name: 'connection_id',
+        type: dynamodb.AttributeType.STRING,
+      },
+      projectionType: dynamodb.ProjectionType.ALL,
+    });
+
     // Outputs
     new cdk.CfnOutput(this, 'PhotosBucketName', {
       value: this.photosBucket.bucketName,
@@ -81,6 +113,11 @@ export class StorageStack extends cdk.Stack {
     new cdk.CfnOutput(this, 'MetadataTableName', {
       value: this.metadataTable.tableName,
       exportName: `${this.stackName}-MetadataTableName`,
+    });
+
+    new cdk.CfnOutput(this, 'WebsocketTableName', {
+      value: this.websocketTable.tableName,
+      exportName: `${this.stackName}-WebsocketTableName`,
     });
   }
 }

@@ -1,18 +1,20 @@
 """
 Lambda handler for photo upload
 Generates presigned URLs for direct S3 upload and creates initial metadata record
+Also supports direct file upload via base64 encoding (v1.1)
 """
 import json
 import os
 import uuid
+import base64
 from datetime import datetime
 from typing import Dict, Any
 import sys
 
-# Add shared directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../'))
+# Add Lambda root directory to path (where shared module is located)
+sys.path.insert(0, os.path.dirname(__file__))
 
-from shared.s3 import generate_presigned_url, generate_photo_key
+from shared.s3 import generate_presigned_url, generate_photo_key, upload_file_to_s3
 from shared.dynamodb import put_metadata
 from shared.models import PhotoMetadata
 
@@ -59,7 +61,64 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         photo_id = str(uuid.uuid4())
         s3_key = generate_photo_key(user_id, photo_id)
         
-        # Generate presigned URL (1 hour expiration)
+        # Check if file is provided as base64 (direct upload)
+        if 'file' in body and body.get('file'):
+            # Direct upload via base64
+            try:
+                file_data = base64.b64decode(body['file'])
+                success = upload_file_to_s3(
+                    bucket_name=bucket_name,
+                    object_key=s3_key,
+                    file_data=file_data,
+                    content_type=content_type,
+                    region=region
+                )
+                
+                if not success:
+                    return {
+                        'statusCode': 500,
+                        'headers': {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*',
+                        },
+                        'body': json.dumps({'error': 'Failed to upload file to S3'})
+                    }
+                
+                # Create metadata record
+                metadata = PhotoMetadata(
+                    photo_id=photo_id,
+                    timestamp=datetime.utcnow().isoformat() + 'Z',
+                    s3_key=s3_key,
+                    user_id=user_id,
+                    status='pending'
+                )
+                
+                put_metadata(table_name, metadata, region)
+                
+                return {
+                    'statusCode': 200,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*',
+                    },
+                    'body': json.dumps({
+                        'photo_id': photo_id,
+                        's3_key': s3_key,
+                        'uploaded': True
+                    })
+                }
+            except Exception as e:
+                print(f"Error in direct upload: {e}")
+                return {
+                    'statusCode': 500,
+                    'headers': {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*',
+                    },
+                    'body': json.dumps({'error': f'Upload failed: {str(e)}'})
+                }
+        
+        # Generate presigned URL (1 hour expiration) for client-side upload
         upload_url = generate_presigned_url(
             bucket_name=bucket_name,
             object_key=s3_key,
@@ -70,6 +129,10 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         if not upload_url:
             return {
                 'statusCode': 500,
+                'headers': {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                },
                 'body': json.dumps({'error': 'Failed to generate upload URL'})
             }
         

@@ -2,7 +2,13 @@
 Parser for AI response validation and structure
 """
 import json
+import os
+import sys
 from typing import Dict, Any, List, Optional
+
+# Add Lambda root directory to path (where shared module is located)
+sys.path.insert(0, os.path.dirname(__file__))
+
 from shared.models import Detection, Material
 
 

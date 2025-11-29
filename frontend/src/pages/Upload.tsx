@@ -6,26 +6,43 @@ import { PhotoUpload } from '../components/PhotoUpload';
 import { DetectionResults } from '../components/DetectionResults';
 import { DamageVisualization } from '../components/DamageVisualization';
 import { MaterialCount } from '../components/MaterialCount';
+import { WireframeViewer } from '../components/WireframeViewer';
+import { ColorEnhancedViewer } from '../components/ColorEnhancedViewer';
+import { DamageCount } from '../components/DamageCount';
 import { usePhotoDetection } from '../hooks/usePhotoDetection';
+import { AgentStatusList } from '../components/AgentStatusList';
 
 export function Upload() {
-  const { uploading, detecting, metadata, error, uploadPhoto, reset } = usePhotoDetection();
+  const { uploading, analyzing, metadata, error, uploadPhoto, reset, agentStatuses } = usePhotoDetection();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
 
+  const isCompleted =
+    !!metadata &&
+    (metadata.workflow_status === 'completed' || (!metadata.workflow_status && metadata.status === 'completed'));
+
+  const overlapDetections =
+    metadata?.agent3_results?.overlap_areas?.map((area) => ({
+      type: 'roof_damage' as const,
+      category: area.damage_type || 'unknown',
+      confidence: area.confidence || 0,
+      bbox: area.bbox,
+      severity: area.severity,
+    })) || metadata?.detections || [];
+
   const handleFileSelect = async (file: File) => {
     setSelectedFile(file);
-    
+
     // Create preview
     const reader = new FileReader();
     reader.onloadend = () => {
       setImagePreview(reader.result as string);
     };
     reader.readAsDataURL(file);
-    
+
     // Reset previous results
     reset();
-    
+
     // Upload and detect
     await uploadPhoto(file);
   };
@@ -40,21 +57,25 @@ export function Upload() {
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="container mx-auto px-4 max-w-4xl">
         <h1 className="text-3xl font-bold text-gray-900 mb-8">Upload Photo for Analysis</h1>
-        
+
         {/* Upload Section */}
         {!selectedFile && (
           <div className="mb-8">
-            <PhotoUpload onFileSelect={handleFileSelect} disabled={uploading || detecting} />
+            <PhotoUpload onFileSelect={handleFileSelect} disabled={uploading || analyzing} />
           </div>
         )}
 
+        {selectedFile && (
+          <AgentStatusList statuses={agentStatuses} />
+        )}
+
         {/* Loading States */}
-        {(uploading || detecting) && (
+        {(uploading || analyzing) && (
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-8">
             <div className="flex items-center">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mr-3"></div>
               <p className="text-blue-900">
-                {uploading ? 'Uploading photo...' : 'Analyzing photo with AI...'}
+                {uploading ? 'Uploading photo...' : 'Running multi-agent analysis...'}
               </p>
             </div>
           </div>
@@ -74,26 +95,51 @@ export function Upload() {
         )}
 
         {/* Results Section */}
-        {metadata && metadata.status === 'completed' && imagePreview && (
+        {isCompleted && metadata && imagePreview && (
           <div className="space-y-8">
             <div>
               <h2 className="text-2xl font-semibold mb-4">Analysis Results</h2>
-              
+
+              {metadata.agent1_results?.wireframe_base64 && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-3">Structural Wireframe</h3>
+                  <WireframeViewer
+                    wireframeBase64={metadata.agent1_results.wireframe_base64}
+                    zones={metadata.agent1_results.zones}
+                  />
+                </div>
+              )}
+
+              {metadata.agent2_results?.enhanced_image_base64 && (
+                <div className="mb-6">
+                  <h3 className="text-lg font-semibold mb-3">Color Enhancement</h3>
+                  <ColorEnhancedViewer
+                    enhancedImageBase64={metadata.agent2_results.enhanced_image_base64}
+                  />
+                </div>
+              )}
+
               {/* Image with bounding boxes */}
               <div className="mb-6">
                 <h3 className="text-lg font-semibold mb-3">Damage Visualization</h3>
-                <DamageVisualization
-                  imageUrl={imagePreview}
-                  detections={metadata.detections}
-                />
+                <DamageVisualization imageUrl={imagePreview} detections={overlapDetections} overlayUrl={metadata.overlay_url} />
+                {metadata.report_url && (
+                  <div className="mt-3">
+                    <a
+                      href={metadata.report_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-blue-600 hover:underline text-sm font-medium"
+                    >
+                      Download detailed damage report
+                    </a>
+                  </div>
+                )}
               </div>
 
               {/* Detection Results */}
               <div className="mb-6">
-                <DetectionResults
-                  detections={metadata.detections}
-                  materials={metadata.materials}
-                />
+                <DetectionResults detections={overlapDetections} materials={metadata.materials} />
               </div>
 
               {/* Material Count */}
@@ -104,11 +150,22 @@ export function Upload() {
                 </div>
               )}
 
+              {metadata.agent3_results?.damage_counts && (
+                <div className="mb-6">
+                  <DamageCount damageCounts={metadata.agent3_results.damage_counts} />
+                </div>
+              )}
+
               {/* Processing Info */}
-              <div className="mt-6 bg-gray-50 rounded-lg p-4">
+              <div className="mt-6 bg-gray-50 rounded-lg p-4 space-y-2">
                 <p className="text-sm text-gray-600">
-                  Processed in {metadata.processing_time_ms}ms using {metadata.ai_provider || 'AI'}
+                  Workflow status: {metadata.workflow_status || metadata.status}
                 </p>
+                {metadata.processing_time_ms && (
+                  <p className="text-sm text-gray-600">
+                    Processed in {metadata.processing_time_ms}ms using {metadata.ai_provider || 'AI'}
+                  </p>
+                )}
               </div>
 
               {/* Reset Button */}
@@ -123,7 +180,7 @@ export function Upload() {
         )}
 
         {/* Selected File Preview (before detection) */}
-        {selectedFile && !metadata && !uploading && !detecting && !error && (
+        {selectedFile && !metadata && !uploading && !analyzing && !error && (
           <div className="bg-white border border-gray-200 rounded-lg p-6">
             <h2 className="text-xl font-semibold mb-4">Selected Photo</h2>
             {imagePreview && (
