@@ -2,12 +2,7 @@
  * API service for backend communication
  */
 import axios from 'axios';
-import type {
-  UploadResponse,
-  DetectionResponse,
-  PhotoMetadata,
-  SingleAgentResultsResponse,
-} from '../types/detection';
+import type { UploadResponse, DetectionResponse, PhotoMetadata } from '../types/detection';
 import { extractErrorMessage } from '../utils/errorUtils';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
@@ -120,107 +115,4 @@ export async function getPhotoMetadata(photoId: string): Promise<PhotoMetadata> 
   return response.data;
 }
 
-/**
- * Poll for detection results
- */
-export async function pollDetectionResults(
-  photoId: string,
-  maxAttempts: number = 30,
-  intervalMs: number = 2000
-): Promise<PhotoMetadata> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const metadata = await getPhotoMetadata(photoId);
-    
-    if (metadata.status === 'completed') {
-      return metadata;
-    }
-    
-    if (metadata.status === 'failed') {
-      throw new Error('Detection failed');
-    }
-    
-    // Wait before next poll
-    await new Promise(resolve => setTimeout(resolve, intervalMs));
-  }
-  
-  throw new Error('Detection timeout');
-}
-
-/**
- * Trigger multi-agent analysis for a photo
- */
-export async function analyzePhoto(
-  photoId: string,
-  s3Key?: string
-): Promise<{ photo_id: string; execution_arn: string; workflow_status: string }> {
-  const response = await api.post<{ photo_id: string; execution_arn: string; workflow_status: string }>(
-    `/photos/${photoId}/analyze`,
-    {
-      photo_id: photoId,
-      s3_key: s3Key,
-    }
-  );
-  return response.data;
-}
-
-/**
- * Poll for workflow results (multi-agent analysis)
- */
-export async function pollWorkflowResults(
-  photoId: string,
-  maxAttempts: number = 60,
-  intervalMs: number = 2000
-): Promise<PhotoMetadata> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const metadata = await getPhotoMetadata(photoId);
-    
-    const workflowStatus = metadata.workflow_status || metadata.status;
-    
-    if (workflowStatus === 'completed') {
-      return metadata;
-    }
-    
-    if (workflowStatus === 'failed') {
-      throw new Error('Workflow failed');
-    }
-    
-    // Wait before next poll
-    await new Promise(resolve => setTimeout(resolve, intervalMs));
-  }
-  
-  throw new Error('Workflow timeout');
-}
-
-/**
- * Fetch single-agent results
- */
-export async function getSingleAgentResults(photoId: string): Promise<SingleAgentResultsResponse> {
-  const response = await api.get<SingleAgentResultsResponse>(`/photos/${photoId}/single-agent`);
-  return response.data;
-}
-
-/**
- * Poll until single-agent results are available
- */
-export async function pollSingleAgentResults(
-  photoId: string,
-  maxAttempts: number = 40,
-  intervalMs: number = 2000
-): Promise<SingleAgentResultsResponse> {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    try {
-      const result = await getSingleAgentResults(photoId);
-      if (result.single_agent_results) {
-        return result;
-      }
-    } catch (err: any) {
-      const status = err?.response?.status;
-      if (status !== 404) {
-        throw err;
-      }
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-  throw new Error('Single-agent results timeout');
-}
-
+// Single-agent is now the default detection flow; POST /detect runs YOLO pipeline synchronously.

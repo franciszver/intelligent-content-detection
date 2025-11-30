@@ -4,7 +4,7 @@ Lambda handler for the Single Agent (YOLO + CV + GPT) damage pipeline.
 import json
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 import sys
 
 # Ensure local path + Lambda layer site packages are available
@@ -50,6 +50,81 @@ def _parse_class_names(env_value: Optional[str]) -> Optional[list[str]]:
     return None
 
 
+def _normalize_event(event: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+    """
+    Normalize incoming event into the simple {photo_id, s3_key, user_id} payload.
+    Returns (payload, is_api_gateway_event).
+    """
+    if not isinstance(event, dict):
+        raise ValueError("Event must be a dictionary.")
+
+    # Step Functions/direct invocation already send the expected payload
+    if "photo_id" in event and "s3_key" in event and "httpMethod" not in event:
+        return (
+            {
+                "photo_id": event.get("photo_id"),
+                "s3_key": event.get("s3_key"),
+                "user_id": event.get("user_id"),
+            },
+            False,
+        )
+
+    # API Gateway proxy event
+    body: Dict[str, Any] = {}
+    raw_body = event.get("body")
+    if isinstance(raw_body, str):
+        try:
+            body = json.loads(raw_body or "{}")
+        except json.JSONDecodeError:
+            body = {}
+    elif isinstance(raw_body, dict):
+        body = raw_body
+
+    path_params = event.get("pathParameters") or {}
+    query_params = event.get("queryStringParameters") or {}
+
+    photo_id = (
+        path_params.get("photoId")
+        or path_params.get("photo_id")
+        or body.get("photo_id")
+        or query_params.get("photo_id")
+    )
+    s3_key = body.get("s3_key") or query_params.get("s3_key")
+    user_id = body.get("user_id")
+
+    if not photo_id:
+        raise ValueError("photo_id is required.")
+    if not s3_key:
+        raise ValueError("s3_key is required.")
+
+    return ({"photo_id": photo_id, "s3_key": s3_key, "user_id": user_id}, True)
+
+
+def _build_response(payload: Dict[str, Any], is_api_event: bool) -> Dict[str, Any]:
+    if not is_api_event:
+        return payload
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+        },
+        "body": json.dumps(payload),
+    }
+
+
+def _mark_metadata_failed(table: str, region: str, photo_id: Optional[str]) -> None:
+    if not photo_id:
+        return
+    try:
+        metadata = get_metadata(table, photo_id, region)
+        if metadata:
+            metadata.status = "failed"
+            put_metadata(table, metadata, region)
+    except Exception as error:  # pragma: no cover - best-effort failure logging
+        print(f"[SingleAgent] Failed to update metadata for {photo_id}: {error}")
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Event shape:
@@ -73,144 +148,173 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     if not bucket_name or not table_name or not model_bucket or not model_key:
         raise ValueError("Missing required environment variables for single agent handler.")
 
-    photo_id = event.get("photo_id")
-    s3_key = event.get("s3_key")
-    if not photo_id or not s3_key:
-        raise ValueError("Event must include photo_id and s3_key.")
+    payload, is_api_event = _normalize_event(event)
+    photo_id = payload["photo_id"]
+    s3_key = payload["s3_key"]
+    user_id = payload.get("user_id")
 
     print(f"[SingleAgent] Starting analysis for {photo_id} ({s3_key})")
 
-    # Download source image
-    image_bytes = download_image(bucket_name, s3_key, region)
-    if not image_bytes:
-        raise FileNotFoundError(f"Image {s3_key} was not found in bucket {bucket_name}.")
+    metadata = None
+    try:
+        # Download source image
+        image_bytes = download_image(bucket_name, s3_key, region)
+        if not image_bytes:
+            raise FileNotFoundError(f"Image {s3_key} was not found in bucket {bucket_name}.")
 
-    is_valid, error_msg = validate_image(image_bytes)
-    if not is_valid:
-        raise ValueError(f"Invalid image: {error_msg}")
+        is_valid, error_msg = validate_image(image_bytes)
+        if not is_valid:
+            raise ValueError(f"Invalid image: {error_msg}")
 
-    from PIL import Image
-    import io
+        from PIL import Image
+        import io
 
-    img = Image.open(io.BytesIO(image_bytes))
-    image_width, image_height = img.size
+        img = Image.open(io.BytesIO(image_bytes))
+        image_width, image_height = img.size
 
-    # Load YOLO model session
-    session = get_or_create_session(model_bucket, model_key, region)
+        # Load YOLO model session
+        session = get_or_create_session(model_bucket, model_key, region)
 
-    ai_client = AIClient()
+        ai_client = AIClient()
 
-    yolo_detections = run_yolo_inference(
-        image_bytes,
-        session=session,
-        class_names=class_names,
-        conf_threshold=float(os.environ.get("YOLO_CONF_THRESHOLD", "0.3")),
-        iou_threshold=float(os.environ.get("YOLO_IOU_THRESHOLD", "0.45")),
-    )
-    print(f"[SingleAgent] YOLO detections: {len(yolo_detections)}")
+        yolo_detections = run_yolo_inference(
+            image_bytes,
+            session=session,
+            class_names=class_names,
+            conf_threshold=float(os.environ.get("YOLO_CONF_THRESHOLD", "0.3")),
+            iou_threshold=float(os.environ.get("YOLO_IOU_THRESHOLD", "0.45")),
+        )
+        print(f"[SingleAgent] YOLO detections: {len(yolo_detections)}")
 
-    # Merge with CV heuristics
-    damage_areas = enrich_with_cv(image_bytes, yolo_detections)
-    print(f"[SingleAgent] After CV merge: {len(damage_areas)} detections")
+        # Merge with CV heuristics
+        damage_areas = enrich_with_cv(image_bytes, yolo_detections)
+        print(f"[SingleAgent] After CV merge: {len(damage_areas)} detections")
 
-    # Refine via GPT classification and metadata
-    if damage_areas:
-        damage_areas = annotate_damage_with_ai(
+        # Refine via GPT classification and metadata
+        if damage_areas:
+            damage_areas = annotate_damage_with_ai(
+                image_bytes,
+                damage_areas,
+                ai_client,
+                task="missing shingles, torn shingles, hail impact, discoloration, structural cracks",
+            )
+
+        damage_areas = filter_large_damage_areas(damage_areas, image_width, image_height)
+
+        # Add grid coordinates for easier UI mapping
+        for area in damage_areas:
+            bbox = area.get("bbox")
+            if bbox and len(bbox) == 4:
+                area["grid_coords"] = bbox_to_grid_coords(bbox, image_width, image_height)
+
+        counts = count_damage_instances(damage_areas)
+
+        summary_text, recommendations, ai_provider, gpt_response = summarize_with_ai(
+            ai_client,
             image_bytes,
             damage_areas,
-            ai_client,
-            task="missing shingles, torn shingles, hail impact, discoloration, structural cracks",
         )
 
-    damage_areas = filter_large_damage_areas(damage_areas, image_width, image_height)
-
-    # Add grid coordinates for easier UI mapping
-    for area in damage_areas:
-        bbox = area.get("bbox")
-        if bbox and len(bbox) == 4:
-            area["grid_coords"] = bbox_to_grid_coords(bbox, image_width, image_height)
-
-    counts = count_damage_instances(damage_areas)
-
-    summary_text, recommendations, ai_provider, gpt_response = summarize_with_ai(
-        ai_client,
-        image_bytes,
-        damage_areas,
-    )
-
-    overlay_bytes = generate_overlay(
-        image_bytes,
-        damage_areas,
-        damage_types=[area.get("damage_type", "unknown") for area in damage_areas],
-        counts=counts,
-    )
-    timestamp = int(time.time())
-    overlay_key = f"{overlay_prefix}/{photo_id}-{timestamp}.png"
-    upload_file_to_s3(
-        bucket_name,
-        overlay_key,
-        overlay_bytes,
-        content_type="image/png",
-        region=region,
-    )
-
-    report_payload = {
-        "photo_id": photo_id,
-        "generated_at": timestamp,
-        "summary": summary_text,
-        "recommendations": recommendations,
-        "counts": counts,
-        "detections": damage_areas,
-        "ai_provider": ai_provider,
-        "gpt_response": gpt_response,
-    }
-    report_bytes = json.dumps(report_payload, default=str, indent=2).encode("utf-8")
-    report_key = f"{report_prefix}/{photo_id}-{timestamp}.json"
-    upload_file_to_s3(
-        bucket_name,
-        report_key,
-        report_bytes,
-        content_type="application/json",
-        region=region,
-    )
-
-    processing_time_ms = int((time.time() - start_time) * 1000)
-    single_agent_record = {
-        "model_version": os.environ.get("SINGLE_AGENT_MODEL_VERSION", "single-agent-v1"),
-        "damage_areas": damage_areas,
-        "damage_counts": counts,
-        "ai_summary": summary_text,
-        "ai_recommendations": recommendations,
-        "ai_provider": ai_provider,
-        "gpt_response": gpt_response,
-        "processing_time_ms": processing_time_ms,
-    }
-
-    metadata = get_metadata(table_name, photo_id, region)
-    if not metadata:
-        metadata = PhotoMetadata(
-            photo_id=photo_id,
-            timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            s3_key=s3_key,
-            status="processing",
+        overlay_bytes = generate_overlay(
+            image_bytes,
+            damage_areas,
+            damage_types=[area.get("damage_type", "unknown") for area in damage_areas],
+            counts=counts,
+        )
+        timestamp = int(time.time())
+        overlay_key = f"{overlay_prefix}/{photo_id}-{timestamp}.png"
+        upload_file_to_s3(
+            bucket_name,
+            overlay_key,
+            overlay_bytes,
+            content_type="image/png",
+            region=region,
         )
 
-    metadata.single_agent_results = single_agent_record
-    metadata.single_agent_overlay_s3_key = overlay_key
-    metadata.single_agent_report_s3_key = report_key
-    put_metadata(table_name, metadata, region)
-
-    print(f"[SingleAgent] Completed {photo_id} in {processing_time_ms} ms")
-
-    return {
-        "photo_id": photo_id,
-        "single_agent_summary": {
-            "damage_area_count": len(damage_areas),
-            "overlay_generated": True,
+        report_payload = {
+            "photo_id": photo_id,
+            "generated_at": timestamp,
+            "summary": summary_text,
+            "recommendations": recommendations,
+            "counts": counts,
+            "detections": damage_areas,
             "ai_provider": ai_provider,
+            "gpt_response": gpt_response,
+        }
+        report_bytes = json.dumps(report_payload, default=str, indent=2).encode("utf-8")
+        report_key = f"{report_prefix}/{photo_id}-{timestamp}.json"
+        upload_file_to_s3(
+            bucket_name,
+            report_key,
+            report_bytes,
+            content_type="application/json",
+            region=region,
+        )
+
+        processing_time_ms = int((time.time() - start_time) * 1000)
+        single_agent_record = {
+            "model_version": os.environ.get("SINGLE_AGENT_MODEL_VERSION", "single-agent-v1"),
+            "damage_areas": damage_areas,
+            "damage_counts": counts,
+            "ai_summary": summary_text,
+            "ai_recommendations": recommendations,
+            "ai_provider": ai_provider,
+            "gpt_response": gpt_response,
             "processing_time_ms": processing_time_ms,
-        },
-        "single_agent_overlay_key": overlay_key,
-        "single_agent_report_key": report_key,
-    }
+        }
+
+        metadata = get_metadata(table_name, photo_id, region)
+        if not metadata:
+            metadata = PhotoMetadata(
+                photo_id=photo_id,
+                timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                s3_key=s3_key,
+                status="processing",
+                user_id=user_id,
+            )
+
+        # Map detections into the generic detections array for backwards compatibility
+        metadata.detections = [
+            {
+                "type": "roof_damage",
+                "category": area.get("damage_type", "unknown"),
+                "confidence": area.get("confidence", 0.0),
+                "bbox": area.get("bbox"),
+                "severity": area.get("severity"),
+            }
+            for area in damage_areas
+            if area.get("bbox")
+        ]
+        metadata.materials = metadata.materials or []
+        metadata.status = "completed"
+        metadata.processing_time_ms = processing_time_ms
+        metadata.ai_provider = ai_provider or metadata.ai_provider
+        metadata.single_agent_results = single_agent_record
+        metadata.single_agent_overlay_s3_key = overlay_key
+        metadata.single_agent_report_s3_key = report_key
+        put_metadata(table_name, metadata, region)
+
+        print(f"[SingleAgent] Completed {photo_id} in {processing_time_ms} ms")
+
+        response_payload = {
+            "photo_id": photo_id,
+            "status": "completed",
+            "single_agent_results": single_agent_record,
+            "single_agent_overlay_key": overlay_key,
+            "single_agent_report_key": report_key,
+        }
+
+        return _build_response(response_payload, is_api_event)
+    except Exception as exc:
+        _mark_metadata_failed(table_name, region, photo_id)
+        if is_api_event:
+            return {
+                "statusCode": 500,
+                "headers": {
+                    "Content-Type": "application/json",
+                    "Access-Control-Allow-Origin": "*",
+                },
+                "body": json.dumps({"error": str(exc)}),
+            }
+        raise
 

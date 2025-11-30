@@ -37,38 +37,33 @@ class MetadataQueryHandlerTests(unittest.TestCase):
 
     @patch.object(metadata_query_handler, "generate_presigned_get_url")
     @patch.object(metadata_query_handler, "get_metadata")
-    def test_handler_returns_multi_agent_fields(self, mock_get_metadata, mock_presign):
+    def test_handler_returns_single_agent_fields(self, mock_get_metadata, mock_presign):
         mock_metadata = MagicMock()
         mock_metadata.photo_id = "photo-123"
         mock_metadata.timestamp = "2024-01-01T00:00:00Z"
         mock_metadata.s3_key = "photos/user/photo-123.jpg"
         mock_metadata.status = "completed"
-        mock_metadata.workflow_status = "completed"
         mock_metadata.detections = []
         mock_metadata.materials = []
         mock_metadata.user_id = None
         mock_metadata.processing_time_ms = 450
         mock_metadata.ai_provider = "openai"
-        mock_metadata.agent1_results = {"wireframe_base64": "AAA"}
-        mock_metadata.agent2_results = {"enhanced_image_base64": "BBB"}
-        mock_metadata.agent3_results = {"damage_counts": {"missing_shingles": 2}}
-        mock_metadata.overlay_s3_key = "overlays/photo-123/overlay.png"
-        mock_metadata.report_s3_key = "reports/photo-123/report.json"
+        mock_metadata.single_agent_results = {"ai_summary": "summary"}
+        mock_metadata.single_agent_overlay_s3_key = "single-agent/overlay.png"
+        mock_metadata.single_agent_report_s3_key = "single-agent/report.json"
 
         mock_get_metadata.return_value = mock_metadata
-        mock_presign.side_effect = ["https://overlay-url", "https://report-url"]
+        mock_presign.side_effect = ["https://single-overlay", "https://single-report"]
 
         event = {"pathParameters": {"photoId": "photo-123"}}
         response = metadata_query_handler.handler(event, None)
         body = json.loads(response["body"])
 
         self.assertEqual(body["photo_id"], "photo-123")
-        self.assertEqual(body["workflow_status"], "completed")
-        self.assertIn("agent1_results", body)
-        self.assertIn("agent2_results", body)
-        self.assertIn("agent3_results", body)
-        self.assertEqual(body["overlay_url"], "https://overlay-url")
-        self.assertEqual(body["report_url"], "https://report-url")
+        self.assertNotIn("workflow_status", body)
+        self.assertEqual(body["single_agent_results"]["ai_summary"], "summary")
+        self.assertEqual(body["single_agent_overlay_url"], "https://single-overlay")
+        self.assertEqual(body["single_agent_report_url"], "https://single-report")
 
 
 if __name__ == "__main__":

@@ -15,13 +15,6 @@ class BoundingBox(BaseModel):
     y2: int = Field(..., description="Bottom-right y coordinate")
 
 
-class RoofZone(BaseModel):
-    """Roof zone segmentation result"""
-    zone_type: str = Field(..., description="Zone type: shingles, vents, skylights, gutters, edges")
-    bbox: List[int] = Field(..., description="Bounding box [x1, y1, x2, y2]")
-    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score")
-
-
 class DamageArea(BaseModel):
     """Damage area detection result"""
     bbox: List[int] = Field(..., description="Bounding box [x1, y1, x2, y2]")
@@ -34,29 +27,6 @@ class DamageArea(BaseModel):
     ai_provider: Optional[str] = Field(None, description="AI provider used for annotation")
     zone_id: Optional[str] = Field(None, description="Associated roof zone id")
     notes: Optional[str] = Field(None, description="Additional inspector notes")
-
-
-class WireframeAnalysis(BaseModel):
-    """Wireframe analysis results"""
-    wireframe_base64: str = Field(..., description="Base64 encoded wireframe image")
-    zones: List[Dict[str, Any]] = Field(default_factory=list, description="Roof zones")
-    damage_areas: List[Dict[str, Any]] = Field(default_factory=list, description="Detected damage areas")
-
-
-class ColorAnalysis(BaseModel):
-    """Color enhancement analysis results"""
-    enhanced_image_base64: str = Field(..., description="Base64 encoded enhanced image")
-    damage_areas: List[Dict[str, Any]] = Field(default_factory=list, description="Detected damage areas")
-    discoloration_severity: Optional[float] = Field(None, ge=0.0, le=1.0, description="Overall discoloration severity")
-
-
-class OverlayAnalysis(BaseModel):
-    """Overlay analysis results"""
-    overlap_areas: List[Dict[str, Any]] = Field(default_factory=list, description="Overlapping damage areas with merged confidences")
-    damage_counts: Dict[str, int] = Field(default_factory=dict, description="Damage counts by type")
-    overlay_s3_key: Optional[str] = Field(None, description="S3 key for overlay image")
-    report_s3_key: Optional[str] = Field(None, description="S3 key for damage report")
-    damage_summary: Optional[Dict[str, Any]] = Field(None, description="Summary statistics")
 
 
 class SingleAgentResult(BaseModel):
@@ -101,13 +71,6 @@ class PhotoMetadata(BaseModel):
     processing_time_ms: Optional[int] = None
     ai_provider: Optional[str] = None
     expires_at: Optional[int] = None
-    # Multi-agent workflow fields
-    workflow_status: Optional[str] = Field(None, description="pending, processing, completed, failed")
-    agent1_results: Optional[Dict[str, Any]] = Field(None, description="Wireframe analysis results")
-    agent2_results: Optional[Dict[str, Any]] = Field(None, description="Color analysis results")
-    agent3_results: Optional[Dict[str, Any]] = Field(None, description="Overlay analysis results")
-    overlay_s3_key: Optional[str] = Field(None, description="S3 key for overlay image")
-    report_s3_key: Optional[str] = Field(None, description="S3 key for damage report")
     single_agent_results: Optional[Dict[str, Any]] = Field(None, description="Single-agent analysis results")
     single_agent_overlay_s3_key: Optional[str] = Field(None, description="S3 key for single-agent overlay image")
     single_agent_report_s3_key: Optional[str] = Field(None, description="S3 key for single-agent report JSON")
@@ -140,18 +103,6 @@ class PhotoMetadata(BaseModel):
             item['ai_provider'] = self.ai_provider
         if self.expires_at:
             item['expires_at'] = self.expires_at
-        if self.workflow_status:
-            item['workflow_status'] = self.workflow_status
-        if self.agent1_results:
-            item['agent1_results'] = convert_floats(self.agent1_results)
-        if self.agent2_results:
-            item['agent2_results'] = convert_floats(self.agent2_results)
-        if self.agent3_results:
-            item['agent3_results'] = convert_floats(self.agent3_results)
-        if self.overlay_s3_key:
-            item['overlay_s3_key'] = self.overlay_s3_key
-        if self.report_s3_key:
-            item['report_s3_key'] = self.report_s3_key
         if self.single_agent_results:
             item['single_agent_results'] = convert_floats(self.single_agent_results)
         if self.single_agent_overlay_s3_key:

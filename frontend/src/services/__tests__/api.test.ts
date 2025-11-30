@@ -19,18 +19,7 @@ vi.mock('axios', () => {
 });
 
 // Import after mocking
-import {
-  getUploadUrl,
-  uploadPhotoToS3,
-  uploadPhotoViaApi,
-  triggerDetection,
-  getPhotoMetadata,
-  pollDetectionResults,
-  analyzePhoto,
-  pollWorkflowResults,
-  getSingleAgentResults,
-  pollSingleAgentResults,
-} from '../api';
+import { getUploadUrl, uploadPhotoToS3, uploadPhotoViaApi, triggerDetection, getPhotoMetadata } from '../api';
 
 describe('API Service', () => {
   beforeEach(() => {
@@ -142,116 +131,5 @@ describe('API Service', () => {
     });
   });
 
-  describe('pollDetectionResults', () => {
-    it('should return metadata when status is completed', async () => {
-      const completedMetadata = {
-        photo_id: 'test-photo-id',
-        status: 'completed',
-        s3_key: 'photos/test.jpg',
-      };
-
-      mockApiInstance.get.mockResolvedValue({ data: completedMetadata });
-
-      const result = await pollDetectionResults('test-photo-id', 1, 0);
-      expect(result).toEqual(completedMetadata);
-    });
-
-    it('should throw error when status is failed', async () => {
-      const failedMetadata = {
-        photo_id: 'test-photo-id',
-        status: 'failed',
-        s3_key: 'photos/test.jpg',
-      };
-
-      mockApiInstance.get.mockResolvedValue({ data: failedMetadata });
-
-      await expect(pollDetectionResults('test-photo-id', 1, 0)).rejects.toThrow('Detection failed');
-    });
-  });
-
-  describe('analyzePhoto', () => {
-    it('should trigger multi-agent analysis', async () => {
-      const mockResponse = {
-        data: {
-          photo_id: 'test-photo-id',
-          execution_arn: 'arn:aws:states:...',
-          workflow_status: 'processing',
-        },
-      };
-
-      mockApiInstance.post.mockResolvedValue(mockResponse);
-
-      const result = await analyzePhoto('test-photo-id', 'photos/test.jpg');
-      expect(result).toEqual(mockResponse.data);
-      expect(mockApiInstance.post).toHaveBeenCalledWith('/photos/test-photo-id/analyze', {
-        photo_id: 'test-photo-id',
-        s3_key: 'photos/test.jpg',
-      });
-    });
-  });
-
-  describe('pollWorkflowResults', () => {
-    it('should return metadata when workflow_status is completed', async () => {
-      const completedMetadata = {
-        photo_id: 'test-photo-id',
-        workflow_status: 'completed',
-        s3_key: 'photos/test.jpg',
-      };
-
-      mockApiInstance.get.mockResolvedValue({ data: completedMetadata });
-
-      const result = await pollWorkflowResults('test-photo-id', 1, 0);
-      expect(result).toEqual(completedMetadata);
-    });
-
-    it('should throw error when workflow_status is failed', async () => {
-      const failedMetadata = {
-        photo_id: 'test-photo-id',
-        workflow_status: 'failed',
-        s3_key: 'photos/test.jpg',
-      };
-
-      mockApiInstance.get.mockResolvedValue({ data: failedMetadata });
-
-      await expect(pollWorkflowResults('test-photo-id', 1, 0)).rejects.toThrow('Workflow failed');
-    });
-  });
-
-  describe('getSingleAgentResults', () => {
-    it('should fetch single agent payload', async () => {
-      const mockResponse = {
-        data: {
-          photo_id: 'test-photo-id',
-          single_agent_results: { ai_summary: 'All good' },
-        },
-      };
-      mockApiInstance.get.mockResolvedValue(mockResponse);
-
-      const result = await getSingleAgentResults('test-photo-id');
-      expect(result).toEqual(mockResponse.data);
-      expect(mockApiInstance.get).toHaveBeenCalledWith('/photos/test-photo-id/single-agent');
-    });
-  });
-
-  describe('pollSingleAgentResults', () => {
-    it('should poll until results exist', async () => {
-      mockApiInstance.get
-        .mockResolvedValueOnce({ data: { photo_id: 'test-photo-id' } })
-        .mockResolvedValueOnce({
-          data: {
-            photo_id: 'test-photo-id',
-            single_agent_results: { ai_summary: 'done' },
-          },
-        });
-
-      const result = await pollSingleAgentResults('test-photo-id', 2, 0);
-      expect(result.single_agent_results?.ai_summary).toBe('done');
-      expect(mockApiInstance.get).toHaveBeenCalledTimes(2);
-    });
-
-    it('should throw on non-404 errors', async () => {
-      mockApiInstance.get.mockRejectedValue({ response: { status: 500 } });
-      await expect(pollSingleAgentResults('test-photo-id', 1, 0)).rejects.toBeDefined();
-    });
-  });
+  // Multi-agent helpers removed in the single-agent simplification.
 });

@@ -3,120 +3,83 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { usePhotoDetection } from '../usePhotoDetection';
 import * as api from '../../services/api';
 
-// Mock the API module
 vi.mock('../../services/api');
+
+const baseUploadResponse = {
+  photo_id: 'test-photo-id',
+  s3_key: 'photos/test.jpg',
+  upload_url: 'https://s3.amazonaws.com/bucket/test.jpg?signature=...',
+};
+
+const baseMetadata = {
+  photo_id: 'test-photo-id',
+  status: 'completed',
+  s3_key: 'photos/test.jpg',
+  detections: [],
+  materials: [],
+};
 
 describe('usePhotoDetection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(api.pollSingleAgentResults).mockResolvedValue({
-      photo_id: 'test-photo-id',
-      single_agent_results: { ai_summary: 'done' },
-    } as any);
-    vi.mocked(api.getSingleAgentResults).mockResolvedValue({
-      photo_id: 'test-photo-id',
-      single_agent_results: { ai_summary: 'done' },
-    } as any);
+    vi.mocked(api.getUploadUrl).mockResolvedValue(baseUploadResponse as any);
+    vi.mocked(api.uploadPhotoToS3).mockResolvedValue(undefined as any);
+    vi.mocked(api.uploadPhotoViaApi).mockResolvedValue(baseUploadResponse as any);
+    vi.mocked(api.triggerDetection).mockResolvedValue({ photo_id: 'test-photo-id', status: 'completed' } as any);
+    vi.mocked(api.getPhotoMetadata).mockResolvedValue(baseMetadata as any);
   });
 
-  it('should initialize with default state', () => {
+  it('initializes with default state', () => {
     const { result } = renderHook(() => usePhotoDetection());
-
     expect(result.current.uploading).toBe(false);
     expect(result.current.analyzing).toBe(false);
-    expect(result.current.metadata).toBe(null);
-    expect(result.current.error).toBe(null);
+    expect(result.current.metadata).toBeNull();
+    expect(result.current.error).toBeNull();
   });
 
-  it('should upload photo and trigger analysis', async () => {
-    const mockFile = new File(['test'], 'test.jpg', { type: 'image/jpeg' });
-    const mockUploadResponse = {
-      photo_id: 'test-photo-id',
-      s3_key: 'photos/test.jpg',
-      upload_url: 'https://s3.amazonaws.com/bucket/test.jpg?signature=...',
-    };
-    const mockMetadata = {
-      photo_id: 'test-photo-id',
-      workflow_status: 'completed',
-      s3_key: 'photos/test.jpg',
-    };
-
-    vi.mocked(api.getUploadUrl).mockResolvedValue(mockUploadResponse);
-    vi.mocked(api.uploadPhotoToS3).mockResolvedValue(undefined);
-    vi.mocked(api.analyzePhoto).mockResolvedValue({
-      photo_id: 'test-photo-id',
-      execution_arn: 'arn:aws:states:...',
-      workflow_status: 'processing',
-    });
-    vi.mocked(api.pollWorkflowResults).mockResolvedValue(mockMetadata);
-
+  it('uploads photo and runs analysis', async () => {
+    const file = new File(['data'], 'test.jpg', { type: 'image/jpeg' });
     const { result } = renderHook(() => usePhotoDetection());
 
-    await result.current.uploadPhoto(mockFile, 'user-123');
+    await result.current.uploadPhoto(file, 'user-123');
 
     await waitFor(() => {
       expect(result.current.uploading).toBe(false);
       expect(result.current.analyzing).toBe(false);
-      expect(result.current.metadata).toEqual(mockMetadata);
+      expect(result.current.metadata).toEqual(baseMetadata);
     });
 
     expect(api.getUploadUrl).toHaveBeenCalledWith('user-123');
-    expect(api.uploadPhotoToS3).toHaveBeenCalledWith(mockUploadResponse.upload_url, mockFile);
-    expect(api.analyzePhoto).toHaveBeenCalledWith('test-photo-id', 'photos/test.jpg');
-    expect(api.pollWorkflowResults).toHaveBeenCalledWith('test-photo-id');
-    expect(api.pollSingleAgentResults).toHaveBeenCalledWith('test-photo-id', 40, 2000);
+    expect(api.uploadPhotoToS3).toHaveBeenCalledWith(baseUploadResponse.upload_url, file);
+    expect(api.triggerDetection).toHaveBeenCalledWith(baseUploadResponse.photo_id, baseUploadResponse.s3_key);
+    expect(api.getPhotoMetadata).toHaveBeenCalledWith(baseUploadResponse.photo_id);
   });
 
-  it('should fallback to API upload on S3 upload error', async () => {
-    const mockFile = new File(['test'], 'test.jpg', { type: 'image/jpeg' });
-    const mockUploadResponse = {
-      photo_id: 'test-photo-id',
-      s3_key: 'photos/test.jpg',
-      upload_url: 'https://s3.amazonaws.com/bucket/test.jpg?signature=...',
-    };
-    const mockApiUploadResponse = {
-      photo_id: 'test-photo-id-api',
-      s3_key: 'photos/test-api.jpg',
-    };
-    const mockMetadata = {
-      photo_id: 'test-photo-id-api',
-      workflow_status: 'completed',
-      s3_key: 'photos/test-api.jpg',
-    };
+  it('falls back to API upload on S3 failure', async () => {
+    const file = new File(['data'], 'test.jpg', { type: 'image/jpeg' });
+    const apiUpload = { photo_id: 'api-photo', s3_key: 'photos/api-photo.jpg' };
 
-    vi.mocked(api.getUploadUrl).mockResolvedValue(mockUploadResponse);
-    vi.mocked(api.uploadPhotoToS3).mockRejectedValue(new Error('CORS_ERROR'));
-    vi.mocked(api.uploadPhotoViaApi).mockResolvedValue(mockApiUploadResponse);
-    vi.mocked(api.analyzePhoto).mockResolvedValue({
-      photo_id: 'test-photo-id-api',
-      execution_arn: 'arn:aws:states:...',
-      workflow_status: 'processing',
-    });
-    vi.mocked(api.pollWorkflowResults).mockResolvedValue(mockMetadata);
+    vi.mocked(api.uploadPhotoToS3).mockRejectedValue(new Error('CORS'));
+    vi.mocked(api.uploadPhotoViaApi).mockResolvedValue(apiUpload as any);
 
     const { result } = renderHook(() => usePhotoDetection());
-
-    await result.current.uploadPhoto(mockFile, 'user-123');
+    await result.current.uploadPhoto(file, 'user-123');
 
     await waitFor(() => {
       expect(result.current.uploading).toBe(false);
       expect(result.current.analyzing).toBe(false);
     });
 
-    expect(api.uploadPhotoViaApi).toHaveBeenCalledWith('user-123', mockFile);
-    expect(api.analyzePhoto).toHaveBeenCalledWith('test-photo-id-api', 'photos/test-api.jpg');
-    expect(api.pollSingleAgentResults).toHaveBeenCalledWith('test-photo-id-api', 40, 2000);
+    expect(api.uploadPhotoViaApi).toHaveBeenCalledWith('user-123', file);
+    expect(api.triggerDetection).toHaveBeenCalledWith('api-photo', 'photos/api-photo.jpg');
   });
 
-  it('should handle upload errors', async () => {
-    const mockFile = new File(['test'], 'test.jpg', { type: 'image/jpeg' });
-    const error = new Error('Upload failed');
-
-    vi.mocked(api.getUploadUrl).mockRejectedValue(error);
+  it('captures upload errors', async () => {
+    const file = new File(['data'], 'test.jpg', { type: 'image/jpeg' });
+    vi.mocked(api.getUploadUrl).mockRejectedValue(new Error('Upload failed'));
 
     const { result } = renderHook(() => usePhotoDetection());
-
-    await result.current.uploadPhoto(mockFile);
+    await result.current.uploadPhoto(file);
 
     await waitFor(() => {
       expect(result.current.uploading).toBe(false);
@@ -124,79 +87,44 @@ describe('usePhotoDetection', () => {
     });
   });
 
-  it('should handle analysis errors', async () => {
-    const mockFile = new File(['test'], 'test.jpg', { type: 'image/jpeg' });
-    const mockUploadResponse = {
-      photo_id: 'test-photo-id',
-      s3_key: 'photos/test.jpg',
-      upload_url: 'https://s3.amazonaws.com/bucket/test.jpg?signature=...',
-    };
-    const error = new Error('Analysis failed');
-
-    vi.mocked(api.getUploadUrl).mockResolvedValue(mockUploadResponse);
-    vi.mocked(api.uploadPhotoToS3).mockResolvedValue(undefined);
-    vi.mocked(api.analyzePhoto).mockRejectedValue(error);
+  it('captures analysis errors', async () => {
+    const file = new File(['data'], 'test.jpg', { type: 'image/jpeg' });
+    vi.mocked(api.triggerDetection).mockRejectedValue(new Error('Analysis failed'));
 
     const { result } = renderHook(() => usePhotoDetection());
-
-    await result.current.uploadPhoto(mockFile);
+    await result.current.uploadPhoto(file);
 
     await waitFor(() => {
       expect(result.current.uploading).toBe(false);
-      expect(result.current.analyzing).toBe(false);
       expect(result.current.error).toBe('Analysis failed');
     });
   });
 
-  it('should reset state', () => {
+  it('manually re-runs analysis', async () => {
     const { result } = renderHook(() => usePhotoDetection());
 
-    // Set some state first
-    result.current.uploadPhoto(new File(['test'], 'test.jpg', { type: 'image/jpeg' }));
-
-    // Reset
-    result.current.reset();
-
-    expect(result.current.uploading).toBe(false);
-    expect(result.current.analyzing).toBe(false);
-    expect(result.current.metadata).toBe(null);
-    expect(result.current.error).toBe(null);
-  });
-
-  it('should manually trigger analysis', async () => {
-    const mockMetadata = {
-      photo_id: 'test-photo-id',
-      workflow_status: 'completed',
-      s3_key: 'photos/test.jpg',
-    };
-
-    vi.mocked(api.analyzePhoto).mockResolvedValue({
-      photo_id: 'test-photo-id',
-      execution_arn: 'arn:aws:states:...',
-      workflow_status: 'processing',
-    });
-    vi.mocked(api.pollWorkflowResults).mockResolvedValue(mockMetadata);
-
-    const { result } = renderHook(() => usePhotoDetection());
-
-    await result.current.analyzePhoto('test-photo-id', 'photos/test.jpg');
+    await result.current.analyzePhoto('manual-photo', 'photos/manual-photo.jpg');
 
     await waitFor(() => {
       expect(result.current.analyzing).toBe(false);
-      expect(result.current.metadata).toEqual(mockMetadata);
     });
 
-    expect(api.analyzePhoto).toHaveBeenCalledWith('test-photo-id', 'photos/test.jpg');
-    expect(api.pollWorkflowResults).toHaveBeenCalledWith('test-photo-id');
-    expect(api.pollSingleAgentResults).toHaveBeenCalledWith('test-photo-id', 40, 2000);
+    expect(api.triggerDetection).toHaveBeenCalledWith('manual-photo', 'photos/manual-photo.jpg');
+    expect(api.getPhotoMetadata).toHaveBeenCalledWith('manual-photo');
   });
 
-  it('should refresh single agent results on demand', async () => {
+  it('resets state', async () => {
+    const file = new File(['data'], 'test.jpg', { type: 'image/jpeg' });
     const { result } = renderHook(() => usePhotoDetection());
-    await result.current.refreshSingleAgent('manual-photo');
-    await waitFor(() => {
-      expect(api.getSingleAgentResults).toHaveBeenCalledWith('manual-photo');
-    });
+
+    await result.current.uploadPhoto(file);
+    await waitFor(() => expect(result.current.metadata).toEqual(baseMetadata));
+
+    result.current.reset();
+    expect(result.current.metadata).toBeNull();
+    expect(result.current.error).toBeNull();
+    expect(result.current.uploading).toBe(false);
+    expect(result.current.analyzing).toBe(false);
   });
 });
 

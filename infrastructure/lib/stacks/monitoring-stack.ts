@@ -33,7 +33,7 @@ export class MonitoringStack extends cdk.Stack {
       namespace: 'AWS/Lambda',
       metricName: 'Duration',
       dimensionsMap: {
-        FunctionName: apiStack.contentDetectionFunction.functionName,
+        FunctionName: apiStack.singleAgentFunction.functionName,
       },
       statistic: 'Average',
       period: cdk.Duration.minutes(5),
@@ -43,7 +43,7 @@ export class MonitoringStack extends cdk.Stack {
       namespace: 'AWS/Lambda',
       metricName: 'Invocations',
       dimensionsMap: {
-        FunctionName: apiStack.contentDetectionFunction.functionName,
+        FunctionName: apiStack.singleAgentFunction.functionName,
       },
       statistic: 'Sum',
       period: cdk.Duration.minutes(5),
@@ -53,7 +53,7 @@ export class MonitoringStack extends cdk.Stack {
       namespace: 'AWS/Lambda',
       metricName: 'Errors',
       dimensionsMap: {
-        FunctionName: apiStack.contentDetectionFunction.functionName,
+        FunctionName: apiStack.singleAgentFunction.functionName,
       },
       statistic: 'Sum',
       period: cdk.Duration.minutes(5),

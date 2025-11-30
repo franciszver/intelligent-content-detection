@@ -42,25 +42,6 @@ if (-not $apiEndpoint -or $apiEndpoint -eq "None") {
     Write-Host "SUCCESS: Found API endpoint: $apiEndpoint" -ForegroundColor Green
 }
 
-# Get WebSocket endpoint
-Write-Host ""
-Write-Host "Getting WebSocket endpoint..." -ForegroundColor Yellow
-$wsEndpoint = aws cloudformation describe-stacks `
-    --stack-name intelligent-content-detection-api `
-    --query "Stacks[0].Outputs[?OutputKey=='WebSocketEndpoint'].OutputValue" `
-    --output text `
-    --region $Region `
-    --profile $AwsProfile `
-    2>$null
-
-if (-not $wsEndpoint -or $wsEndpoint -eq "None") {
-    Write-Host "WARNING: Could not find WebSocket endpoint. WebSocket updates will be disabled." -ForegroundColor Yellow
-    $wsEndpoint = ""
-} else {
-    $wsEndpoint = $wsEndpoint.Trim()
-    Write-Host "SUCCESS: Found WebSocket endpoint: $wsEndpoint" -ForegroundColor Green
-}
-
 # Create .env file
 Write-Host ""
 Write-Host "Creating frontend/.env file..." -ForegroundColor Yellow
@@ -72,9 +53,6 @@ if ($apiEndpoint -notmatch '/prod$') {
 
 $envLines = @()
 $envLines += "VITE_API_BASE_URL=$apiEndpoint"
-if ($wsEndpoint) {
-    $envLines += "VITE_WS_BASE_URL=$wsEndpoint"
-}
 $envContent = $envLines -join [Environment]::NewLine
 $envPath = Join-Path "frontend" ".env"
 $envContent | Set-Content -Encoding UTF8 $envPath

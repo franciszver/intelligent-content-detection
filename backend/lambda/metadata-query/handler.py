@@ -96,14 +96,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'timestamp': metadata.timestamp,
             's3_key': metadata.s3_key,
             'status': metadata.status,
-            'workflow_status': metadata.workflow_status or metadata.status,
             'detections': metadata.detections,
             'materials': metadata.materials,
-            'agent1_results': metadata.agent1_results,
-            'agent2_results': metadata.agent2_results,
-            'agent3_results': metadata.agent3_results,
-            'overlay_s3_key': metadata.overlay_s3_key,
-            'report_s3_key': metadata.report_s3_key,
             'single_agent_results': metadata.single_agent_results,
             'single_agent_overlay_s3_key': metadata.single_agent_overlay_s3_key,
             'single_agent_report_s3_key': metadata.single_agent_report_s3_key,
@@ -117,14 +111,6 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             response_data['ai_provider'] = metadata.ai_provider
         
         # Generate presigned URLs for overlay/report if available
-        if bucket_name and metadata.overlay_s3_key:
-            overlay_url = generate_presigned_get_url(bucket_name, metadata.overlay_s3_key, region=region)
-            if overlay_url:
-                response_data['overlay_url'] = overlay_url
-        if bucket_name and metadata.report_s3_key:
-            report_url = generate_presigned_get_url(bucket_name, metadata.report_s3_key, region=region)
-            if report_url:
-                response_data['report_url'] = report_url
         if bucket_name and metadata.single_agent_overlay_s3_key:
             single_overlay = generate_presigned_get_url(bucket_name, metadata.single_agent_overlay_s3_key, region=region)
             if single_overlay:

@@ -1,7 +1,5 @@
 import * as cdk from 'aws-cdk-lib';
 import * as apigateway from 'aws-cdk-lib/aws-apigateway';
-import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
-import * as apigwv2Integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
@@ -14,14 +12,8 @@ import { SecretsStack } from './secrets-stack';
 export class ApiStack extends cdk.Stack {
   public readonly api: apigateway.RestApi;
   public readonly photoUploadFunction: lambda.Function;
-  public readonly contentDetectionFunction: lambda.Function;
   public readonly metadataQueryFunction: lambda.Function;
-  public readonly orchestratorFunction: lambda.Function;
-  public readonly agent1Function: lambda.Function;
-  public readonly agent2Function: lambda.Function;
-  public readonly agent3Function: lambda.Function;
   public readonly singleAgentFunction: lambda.Function;
-  public readonly analyzeTriggerFunction: lambda.Function;
   public readonly singleAgentResultsFunction: lambda.Function;
 
   constructor(
@@ -134,65 +126,6 @@ export class ApiStack extends cdk.Stack {
     // Lambda Log Groups with 7-day retention
     const logRetention = logs.RetentionDays.ONE_WEEK;
 
-    const stack = cdk.Stack.of(this);
-
-    // WebSocket manager Lambda
-    const websocketHandler = new lambda.Function(this, 'WebsocketHandler', {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'handler.handler',
-      code: createBundledCode('websocket-manager'),
-      memorySize: 256,
-      timeout: cdk.Duration.seconds(30),
-      logRetention,
-      environment: {
-        WEBSOCKET_TABLE_NAME: storageStack.websocketTable.tableName,
-        CONNECTION_INDEX_NAME: 'connection-index',
-        REGION: CONFIG.REGION,
-      },
-    });
-    storageStack.websocketTable.grantReadWriteData(websocketHandler);
-
-    const websocketApi = new apigwv2.WebSocketApi(this, 'StatusWebSocketApi', {
-      apiName: `${CONFIG.PROJECT_NAME}-ws`,
-      routeSelectionExpression: '$request.body.action',
-      connectRouteOptions: {
-        integration: new apigwv2Integrations.WebSocketLambdaIntegration(
-          'ConnectIntegration',
-          websocketHandler
-        ),
-      },
-      disconnectRouteOptions: {
-        integration: new apigwv2Integrations.WebSocketLambdaIntegration(
-          'DisconnectIntegration',
-          websocketHandler
-        ),
-      },
-      defaultRouteOptions: {
-        integration: new apigwv2Integrations.WebSocketLambdaIntegration(
-          'DefaultIntegration',
-          websocketHandler
-        ),
-      },
-    });
-
-    new apigwv2.WebSocketRoute(this, 'SubscribeRoute', {
-      webSocketApi: websocketApi,
-      routeKey: 'subscribe',
-      integration: new apigwv2Integrations.WebSocketLambdaIntegration(
-        'SubscribeIntegration',
-        websocketHandler
-      ),
-    });
-
-    const websocketStage = new apigwv2.WebSocketStage(this, 'StatusWebSocketStage', {
-      webSocketApi: websocketApi,
-      stageName: 'prod',
-      autoDeploy: true,
-    });
-
-    const websocketManagementEndpoint = `https://${websocketApi.apiId}.execute-api.${stack.region}.amazonaws.com/${websocketStage.stageName}`;
-    const websocketWssEndpoint = `wss://${websocketApi.apiId}.execute-api.${stack.region}.amazonaws.com/${websocketStage.stageName}`;
-
     // Create shared IAM role for all Lambda functions to reduce role count
     const sharedLambdaRole = new iam.Role(this, 'SharedLambdaRole', {
       assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
@@ -210,28 +143,6 @@ export class ApiStack extends cdk.Stack {
     secretsStack.openaiSecret.grantRead(sharedLambdaRole);
     secretsStack.openrouterSecret.grantRead(sharedLambdaRole);
 
-    // SSM Parameter Store access (for state machine ARN)
-    sharedLambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ['ssm:GetParameter', 'ssm:GetParameters'],
-        resources: [
-          `arn:aws:ssm:${CONFIG.REGION}:*:parameter/${CONFIG.PROJECT_NAME}/state-machine-arn`,
-        ],
-      })
-    );
-
-    // Step Functions access (for analyze trigger)
-    sharedLambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        effect: iam.Effect.ALLOW,
-        actions: ['states:StartExecution'],
-        resources: [
-          `arn:aws:states:${CONFIG.REGION}:*:stateMachine:${CONFIG.PROJECT_NAME}-multi-agent-workflow`,
-        ],
-      })
-    );
-
     // Photo Upload Lambda
     this.photoUploadFunction = new lambda.Function(this, 'PhotoUploadFunction', {
       runtime: lambda.Runtime.PYTHON_3_11,
@@ -244,24 +155,6 @@ export class ApiStack extends cdk.Stack {
       environment: {
         S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
         DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
-        REGION: CONFIG.REGION,
-      },
-    });
-
-    // Content Detection Lambda
-    this.contentDetectionFunction = new lambda.Function(this, 'ContentDetectionFunction', {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'handler.handler',
-      code: createBundledCode('content-detection'),
-      memorySize: CONFIG.LAMBDA.CONTENT_DETECTION.MEMORY,
-      timeout: cdk.Duration.seconds(CONFIG.LAMBDA.CONTENT_DETECTION.TIMEOUT),
-      role: sharedLambdaRole,
-      logRetention,
-      environment: {
-        S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
-        DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
-        OPENAI_SECRET_NAME: CONFIG.SECRETS.OPENAI_API_KEY,
-        OPENROUTER_SECRET_NAME: CONFIG.SECRETS.OPENROUTER_API_KEY,
         REGION: CONFIG.REGION,
       },
     });
@@ -279,90 +172,6 @@ export class ApiStack extends cdk.Stack {
         DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
         REGION: CONFIG.REGION,
         S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
-      },
-    });
-
-    // All permissions are granted to sharedLambdaRole above
-    // Individual functions use the shared role
-
-    // Orchestrator Lambda
-    this.orchestratorFunction = new lambda.Function(this, 'OrchestratorFunction', {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'handler.handler',
-      code: createBundledCode('orchestrator'),
-      memorySize: 256,
-      timeout: cdk.Duration.seconds(30),
-      role: sharedLambdaRole,
-      logRetention,
-      environment: {
-        DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
-        REGION: CONFIG.REGION,
-        WEBSOCKET_TABLE_NAME: storageStack.websocketTable.tableName,
-        WEBSOCKET_CONNECTION_INDEX: 'connection-index',
-        WEBSOCKET_API_ENDPOINT: websocketManagementEndpoint,
-      },
-    });
-    storageStack.websocketTable.grantReadWriteData(this.orchestratorFunction);
-    this.orchestratorFunction.addToRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['execute-api:ManageConnections'],
-        resources: [
-          `arn:aws:execute-api:${stack.region}:${stack.account}:${websocketApi.apiId}/${websocketStage.stageName}/POST/@connections/*`,
-        ],
-      })
-    );
-
-    // Agent 1 Lambda (Wireframe)
-    this.agent1Function = new lambda.Function(this, 'Agent1Function', {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'handler.handler',
-      code: createBundledCode('agent-wireframe', true), // Exclude large deps, use layer
-      layers: [cvLayer],
-      memorySize: 1024,
-      timeout: cdk.Duration.seconds(120),
-      role: sharedLambdaRole,
-      logRetention,
-      environment: {
-        S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
-        DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
-        OPENAI_SECRET_NAME: CONFIG.SECRETS.OPENAI_API_KEY,
-        OPENROUTER_SECRET_NAME: CONFIG.SECRETS.OPENROUTER_API_KEY,
-        REGION: CONFIG.REGION,
-      },
-    });
-
-    // Agent 2 Lambda (Color Enhancement)
-    this.agent2Function = new lambda.Function(this, 'Agent2Function', {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'handler.handler',
-      code: createBundledCode('agent-color', true), // Exclude large deps, use layer
-      layers: [cvLayer],
-      memorySize: 1024,
-      timeout: cdk.Duration.seconds(120),
-      role: sharedLambdaRole,
-      logRetention,
-      environment: {
-        S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
-        DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
-        OPENAI_SECRET_NAME: CONFIG.SECRETS.OPENAI_API_KEY,
-        OPENROUTER_SECRET_NAME: CONFIG.SECRETS.OPENROUTER_API_KEY,
-        REGION: CONFIG.REGION,
-      },
-    });
-
-    // Agent 3 Lambda (Overlay Generation)
-    this.agent3Function = new lambda.Function(this, 'Agent3Function', {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'handler.handler',
-      code: createBundledCode('agent-overlay'),
-      memorySize: 1024,
-      timeout: cdk.Duration.seconds(120),
-      role: sharedLambdaRole,
-      logRetention,
-      environment: {
-        S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
-        DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
-        REGION: CONFIG.REGION,
       },
     });
 
@@ -397,22 +206,6 @@ export class ApiStack extends cdk.Stack {
       },
     });
 
-    // Analyze Trigger Lambda (starts Step Functions execution)
-    this.analyzeTriggerFunction = new lambda.Function(this, 'AnalyzeTriggerFunction', {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'handler.handler',
-      code: createBundledCode('analyze-trigger'),
-      memorySize: 256,
-      timeout: cdk.Duration.seconds(30),
-      role: sharedLambdaRole,
-      logRetention,
-      environment: {
-        DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
-        REGION: CONFIG.REGION,
-        STATE_MACHINE_ARN_PARAM: `/${CONFIG.PROJECT_NAME}/state-machine-arn`,
-      },
-    });
-
     this.singleAgentResultsFunction = new lambda.Function(this, 'SingleAgentResultsFunction', {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'handler.handler',
@@ -437,7 +230,7 @@ export class ApiStack extends cdk.Stack {
 
     // POST /photos/{photoId}/detect
     const photoId = photos.addResource('{photoId}');
-    const detectIntegration = new apigateway.LambdaIntegration(this.contentDetectionFunction);
+    const detectIntegration = new apigateway.LambdaIntegration(this.singleAgentFunction);
     photoId.addResource('detect').addMethod('POST', detectIntegration);
 
     // GET /photos/{photoId}/metadata
@@ -447,11 +240,6 @@ export class ApiStack extends cdk.Stack {
     // GET /photos/{photoId}/single-agent
     const singleAgentIntegration = new apigateway.LambdaIntegration(this.singleAgentResultsFunction);
     photoId.addResource('single-agent').addMethod('GET', singleAgentIntegration);
-
-    // POST /photos/{photoId}/analyze - Triggers multi-agent analysis via Step Functions
-    const analyzeResource = photoId.addResource('analyze');
-    const analyzeIntegration = new apigateway.LambdaIntegration(this.analyzeTriggerFunction);
-    analyzeResource.addMethod('POST', analyzeIntegration);
 
     // Outputs
     new cdk.CfnOutput(this, 'ApiEndpoint', {
@@ -464,10 +252,6 @@ export class ApiStack extends cdk.Stack {
       exportName: `${this.stackName}-ApiId`,
     });
 
-    new cdk.CfnOutput(this, 'WebSocketEndpoint', {
-      value: websocketWssEndpoint,
-      exportName: `${this.stackName}-WebSocketEndpoint`,
-    });
   }
 }
 

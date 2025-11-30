@@ -24,10 +24,6 @@ export const CONFIG = {
       MEMORY: 256,
       TIMEOUT: 30,
     },
-    CONTENT_DETECTION: {
-      MEMORY: 1024,
-      TIMEOUT: 60,
-    },
     METADATA_QUERY: {
       MEMORY: 256,
       TIMEOUT: 10,
