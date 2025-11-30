@@ -125,8 +125,8 @@ export function Upload() {
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
                   className={`px-4 py-2 text-sm font-medium -mb-px border-b-2 ${activeTab === tab.id
-                      ? 'border-blue-600 text-blue-600'
-                      : 'border-transparent text-gray-500 hover:text-gray-700'
+                    ? 'border-blue-600 text-blue-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
                     }`}
                 >
                   {tab.label}
