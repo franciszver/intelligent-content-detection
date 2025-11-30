@@ -3,7 +3,6 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as apigwv2Integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
-import * as ecr_assets from 'aws-cdk-lib/aws-ecr-assets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as path from 'path';
@@ -81,6 +80,29 @@ export class ApiStack extends cdk.Stack {
       description: 'Lambda layer containing opencv-python-headless and numpy for CV operations',
     });
 
+    // ONNX Runtime layer for Single Agent Lambda
+    const onnxLayer = new lambda.LayerVersion(this, 'OnnxRuntimeLayer', {
+      code: lambda.Code.fromAsset(backendRoot, {
+        bundling: {
+          image: lambda.Runtime.PYTHON_3_11.bundlingImage,
+          environment: {
+            PIP_DISABLE_PIP_VERSION_CHECK: '1',
+          },
+          command: [
+            'bash',
+            '-c',
+            [
+              'mkdir -p /asset-output/python/lib/python3.11/site-packages',
+              'pip install --no-deps onnxruntime==1.16.3 -t /asset-output/python/lib/python3.11/site-packages --no-cache-dir',
+              'pip install packaging==25.0 protobuf==6.33.1 sympy==1.14.0 coloredlogs==15.0.1 humanfriendly==10.0 flatbuffers==25.9.23 -t /asset-output/python/lib/python3.11/site-packages --no-cache-dir',
+            ].join(' && '),
+          ],
+        },
+      }),
+      compatibleRuntimes: [lambda.Runtime.PYTHON_3_11],
+      description: 'Lambda layer providing onnxruntime and supporting libs for Single Agent inference',
+    });
+
     const createBundledCode = (lambdaDir: string, excludeLargeDeps: boolean = false): lambda.Code =>
       lambda.Code.fromAsset(backendRoot, {
         bundling: {
@@ -94,7 +116,7 @@ export class ApiStack extends cdk.Stack {
             [
               `cd lambda/${lambdaDir}`,
               excludeLargeDeps
-                ? 'grep -v "opencv-python\\|opencv-python-headless\\|numpy" requirements.txt > /tmp/requirements_filtered.txt && pip install -r /tmp/requirements_filtered.txt -t /asset-output --no-cache-dir || pip install -r requirements.txt -t /asset-output --ignore-installed opencv-python opencv-python-headless numpy --no-cache-dir'
+                ? 'grep -v "opencv-python\\|opencv-python-headless\\|numpy\\|onnxruntime" requirements.txt > /tmp/requirements_filtered.txt && pip install -r /tmp/requirements_filtered.txt -t /asset-output --no-cache-dir || pip install -r requirements.txt -t /asset-output --ignore-installed opencv-python opencv-python-headless numpy onnxruntime --no-cache-dir'
                 : 'pip install -r requirements.txt -t /asset-output --no-cache-dir',
               'find /asset-output -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true',
               'find /asset-output -type f -name "*.pyc" -delete 2>/dev/null || true',
@@ -345,14 +367,11 @@ export class ApiStack extends cdk.Stack {
     });
 
     // Single Agent Lambda (YOLO + GPT) - packaged as a Docker image to avoid Lambda zip size limits
-    this.singleAgentFunction = new lambda.DockerImageFunction(this, 'SingleAgentFunction', {
-      code: lambda.DockerImageCode.fromImageAsset(backendRoot, {
-        file: path.join('lambda/agent-single/Dockerfile'),
-        buildArgs: {
-          HANDLER_DIR: 'lambda/agent-single',
-        },
-        platform: ecr_assets.Platform.LINUX_AMD64,
-      }),
+    this.singleAgentFunction = new lambda.Function(this, 'SingleAgentFunction', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'handler.handler',
+      code: createBundledCode('agent-single', true),
+      layers: [cvLayer, onnxLayer],
       memorySize: 1536,
       timeout: cdk.Duration.seconds(180),
       role: sharedLambdaRole,
