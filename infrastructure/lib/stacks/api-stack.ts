@@ -343,12 +343,14 @@ export class ApiStack extends cdk.Stack {
       },
     });
 
-    // Single Agent Lambda (YOLO + GPT)
-    this.singleAgentFunction = new lambda.Function(this, 'SingleAgentFunction', {
-      runtime: lambda.Runtime.PYTHON_3_11,
-      handler: 'handler.handler',
-      code: createBundledCode('agent-single', false), // Bundle all deps (onnxruntime + helpers)
-      layers: [cvLayer],
+    // Single Agent Lambda (YOLO + GPT) - packaged as a Docker image to avoid Lambda zip size limits
+    this.singleAgentFunction = new lambda.DockerImageFunction(this, 'SingleAgentFunction', {
+      code: lambda.DockerImageCode.fromImageAsset(backendRoot, {
+        file: path.join('lambda/agent-single/Dockerfile'),
+        buildArgs: {
+          HANDLER_DIR: 'lambda/agent-single',
+        },
+      }),
       memorySize: 1536,
       timeout: cdk.Duration.seconds(180),
       role: sharedLambdaRole,
