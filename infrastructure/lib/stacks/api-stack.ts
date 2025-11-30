@@ -80,28 +80,6 @@ export class ApiStack extends cdk.Stack {
       description: 'Lambda layer containing opencv-python-headless and numpy for CV operations',
     });
 
-    // Separate layer for ONNX Runtime and its dependencies (used by Single Agent)
-    const onnxLayer = new lambda.LayerVersion(this, 'OnnxRuntimeLayer', {
-      code: lambda.Code.fromAsset(backendRoot, {
-        bundling: {
-          image: lambda.Runtime.PYTHON_3_11.bundlingImage,
-          environment: {
-            PIP_DISABLE_PIP_VERSION_CHECK: '1',
-          },
-          command: [
-            'bash',
-            '-c',
-            [
-              'mkdir -p /asset-output/python/lib/python3.11/site-packages',
-              'pip install numpy==1.24.3 onnxruntime==1.16.3 -t /asset-output/python/lib/python3.11/site-packages --no-cache-dir',
-            ].join(' && '),
-          ],
-        },
-      }),
-      compatibleRuntimes: [lambda.Runtime.PYTHON_3_11],
-      description: 'Lambda layer providing onnxruntime for Single Agent inference',
-    });
-
     const createBundledCode = (lambdaDir: string, excludeLargeDeps: boolean = false): lambda.Code =>
       lambda.Code.fromAsset(backendRoot, {
         bundling: {
@@ -115,7 +93,7 @@ export class ApiStack extends cdk.Stack {
             [
               `cd lambda/${lambdaDir}`,
               excludeLargeDeps
-                ? 'grep -v "opencv-python\\|opencv-python-headless\\|numpy\\|onnxruntime" requirements.txt > /tmp/requirements_filtered.txt && pip install -r /tmp/requirements_filtered.txt -t /asset-output --no-cache-dir || pip install -r requirements.txt -t /asset-output --ignore-installed opencv-python opencv-python-headless numpy onnxruntime --no-cache-dir'
+                ? 'grep -v "opencv-python\\|opencv-python-headless\\|numpy" requirements.txt > /tmp/requirements_filtered.txt && pip install -r /tmp/requirements_filtered.txt -t /asset-output --no-cache-dir || pip install -r requirements.txt -t /asset-output --ignore-installed opencv-python opencv-python-headless numpy --no-cache-dir'
                 : 'pip install -r requirements.txt -t /asset-output --no-cache-dir',
               'find /asset-output -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true',
               'find /asset-output -type f -name "*.pyc" -delete 2>/dev/null || true',
@@ -369,8 +347,8 @@ export class ApiStack extends cdk.Stack {
     this.singleAgentFunction = new lambda.Function(this, 'SingleAgentFunction', {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'handler.handler',
-      code: createBundledCode('agent-single', true), // Use layers for heavy deps
-      layers: [cvLayer, onnxLayer],
+      code: createBundledCode('agent-single', false), // Bundle all deps (onnxruntime + helpers)
+      layers: [cvLayer],
       memorySize: 1536,
       timeout: cdk.Duration.seconds(180),
       role: sharedLambdaRole,
