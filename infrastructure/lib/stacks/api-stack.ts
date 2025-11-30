@@ -3,6 +3,7 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as apigwv2 from 'aws-cdk-lib/aws-apigatewayv2';
 import * as apigwv2Integrations from 'aws-cdk-lib/aws-apigatewayv2-integrations';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
+import * as ecr_assets from 'aws-cdk-lib/aws-ecr-assets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as path from 'path';
@@ -350,6 +351,7 @@ export class ApiStack extends cdk.Stack {
         buildArgs: {
           HANDLER_DIR: 'lambda/agent-single',
         },
+        platform: ecr_assets.Platform.LINUX_AMD64,
       }),
       memorySize: 1536,
       timeout: cdk.Duration.seconds(180),
