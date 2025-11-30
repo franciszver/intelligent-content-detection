@@ -195,8 +195,8 @@ def run_yolo_inference(
 def enrich_with_cv(
     image_bytes: bytes,
     detections: List[Dict[str, Any]],
-    min_area_missing: int = 800,
-    min_area_discoloration: int = 1200,
+    min_area_missing: int = 400,
+    min_area_discoloration: int = 600,
 ) -> List[Dict[str, Any]]:
     """
     Merge YOLO detections with CV heuristics for redundancy and recall.

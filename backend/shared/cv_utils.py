@@ -54,7 +54,7 @@ def _chunk_damage_areas(damage_areas: List[Dict[str, Any]], size: int = 5) -> Li
     return [damage_areas[i:i + size] for i in range(0, len(damage_areas), size)]
 
 
-def detect_missing_shingles_cv(image_bytes: bytes, min_area: int = 900) -> List[Dict[str, Any]]:
+def detect_missing_shingles_cv(image_bytes: bytes, min_area: int = 400) -> List[Dict[str, Any]]:
     """
     Detect missing or mismatched shingles using classical CV routines.
     """
@@ -100,9 +100,10 @@ def detect_missing_shingles_cv(image_bytes: bytes, min_area: int = 900) -> List[
             continue
 
         x, y, w, h = cv2.boundingRect(contour)
-        aspect_ratio = w / float(h) if h > 0 else 0
-        if aspect_ratio < 0.6 or aspect_ratio > 6:
-            continue
+        # Aspect ratio filter removed to improve recall (can be re-enabled if needed)
+        # aspect_ratio = w / float(h) if h > 0 else 0
+        # if aspect_ratio < 0.6 or aspect_ratio > 6:
+        #     continue
 
         bbox = _clamp_bbox([x, y, x + w, y + h], width, height)
         confidence = float(min(0.95, 0.4 + (area / (width * height)) * 3))
@@ -116,7 +117,7 @@ def detect_missing_shingles_cv(image_bytes: bytes, min_area: int = 900) -> List[
     return results
 
 
-def detect_discoloration_cv(image_bytes: bytes, min_area: int = 1200) -> List[Dict[str, Any]]:
+def detect_discoloration_cv(image_bytes: bytes, min_area: int = 600) -> List[Dict[str, Any]]:
     """Detect discoloration or staining using LAB color analysis."""
     _ensure_cv2_available()
     _ensure_numpy_available()
