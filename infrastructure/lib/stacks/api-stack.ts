@@ -59,6 +59,7 @@ export class ApiStack extends cdk.Stack {
     // Create Lambda Layer for large dependencies (opencv-python-headless, numpy)
     // Using headless version to reduce size (no GUI dependencies)
     // This reduces the deployment package size for Agent1 and Agent2
+    // Note: onnxruntime is bundled directly with SingleAgentFunction to avoid layer size limits
     const cvLayer = new lambda.LayerVersion(this, 'CvDependenciesLayer', {
       code: lambda.Code.fromAsset(backendRoot, {
         bundling: {
@@ -347,7 +348,7 @@ export class ApiStack extends cdk.Stack {
     this.singleAgentFunction = new lambda.Function(this, 'SingleAgentFunction', {
       runtime: lambda.Runtime.PYTHON_3_11,
       handler: 'handler.handler',
-      code: createBundledCode('agent-single', true),
+      code: createBundledCode('agent-single', false), // Include onnxruntime in package, not layer
       layers: [cvLayer],
       memorySize: 1536,
       timeout: cdk.Duration.seconds(180),
