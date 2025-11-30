@@ -25,7 +25,19 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
       setAnalyzing(true);
       try {
         await triggerDetection(photoId, s3Key);
-        const latest = await getPhotoMetadata(photoId);
+
+        // Poll for metadata until status is 'completed' or 'failed'
+        // This ensures we get the full results including single_agent_results
+        let attempts = 0;
+        const maxAttempts = 10;
+        let latest = await getPhotoMetadata(photoId);
+
+        while (latest.status === 'processing' && attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+          latest = await getPhotoMetadata(photoId);
+          attempts++;
+        }
+
         setMetadata(latest);
       } catch (err) {
         const errorMessage = extractErrorMessage(err);

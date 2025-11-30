@@ -90,6 +90,7 @@ export function Upload() {
               overlayUrl={metadata.single_agent_overlay_url}
               reportUrl={metadata.single_agent_report_url}
               analyzing={analyzing}
+              detections={metadata.detections || []}
               onRefresh={() => metadata.photo_id && analyzePhoto(metadata.photo_id, metadata.s3_key)}
             />
 
