@@ -100,7 +100,7 @@ export function Upload() {
         )}
 
         {/* Error State */}
-        {error && (
+        {error && typeof error === 'string' && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-6 mb-8">
             <p className="text-red-900">Error: {error}</p>
             <button

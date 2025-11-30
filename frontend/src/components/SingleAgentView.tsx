@@ -22,7 +22,7 @@ export function SingleAgentView({ result, imageUrl, loading, error, onRefresh }:
     );
   }
 
-  if (error) {
+  if (error && typeof error === 'string') {
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg p-6">
         <p className="text-red-900 mb-3">Single agent analysis failed: {error}</p>

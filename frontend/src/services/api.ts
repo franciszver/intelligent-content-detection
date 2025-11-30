@@ -8,6 +8,7 @@ import type {
   PhotoMetadata,
   SingleAgentResultsResponse,
 } from '../types/detection';
+import { extractErrorMessage } from '../utils/errorUtils';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -48,7 +49,7 @@ export async function uploadPhotoToS3(
     });
   } catch (error: any) {
     // If CORS error or network error, throw a specific error to trigger fallback
-    const errorMessage = error?.message || '';
+    const errorMessage = extractErrorMessage(error);
     const errorCode = error?.code || '';
     const isCorsError = 
       errorMessage.includes('CORS') ||

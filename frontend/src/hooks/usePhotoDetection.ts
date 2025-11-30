@@ -12,6 +12,7 @@ import {
   pollSingleAgentResults,
 } from '../services/api';
 import type { PhotoMetadata, SingleAgentResultsResponse, UploadResponse } from '../types/detection';
+import { extractErrorMessage } from '../utils/errorUtils';
 
 type AgentStage = 'orchestrator' | 'agent1' | 'agent2' | 'agent3' | 'single';
 type AgentStatusValue = 'idle' | 'pending' | 'running' | 'completed' | 'failed';
@@ -100,11 +101,12 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
         const stage = normalizeStage(payload.stage);
         if (stage && STAGE_LABELS[stage]) {
           const status = (payload.status || 'running') as AgentStatusValue;
-          const details = payload.error || undefined;
+          const details = payload.error ? extractErrorMessage(payload.error) : undefined;
           updateAgentStatus(stage, status, details);
 
           if (status === 'failed' && payload.error) {
-            setError(payload.error);
+            const errorMessage = extractErrorMessage(payload.error);
+            setError(errorMessage);
             setAnalyzing(false);
           }
         }
@@ -171,7 +173,7 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
         setSingleAgentResults(results);
         updateAgentStatus('single', 'completed');
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to load single-agent data';
+        const errorMessage = extractErrorMessage(err);
         setSingleAgentError(errorMessage);
         updateAgentStatus('single', 'failed', errorMessage);
         if (poll) {
@@ -224,7 +226,7 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
       disconnectWebsocket();
       setAnalyzing(false);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      const errorMessage = extractErrorMessage(err);
       setError(errorMessage);
       setAnalyzing(false);
       disconnectWebsocket();
@@ -248,15 +250,17 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
         console.log('Direct S3 upload successful');
       } catch (err: any) {
         // If any error (especially CORS), fall back to API upload
-        console.warn('Direct S3 upload failed, falling back to API upload:', err?.message || err);
+        const errMsg = extractErrorMessage(err);
+        console.warn('Direct S3 upload failed, falling back to API upload:', errMsg);
         try {
           const apiUploadResult = await uploadPhotoViaApi(userId, file);
           finalPhotoId = apiUploadResult.photo_id;
           finalS3Key = apiUploadResult.s3_key;
           console.log('API upload successful:', { photo_id: finalPhotoId });
         } catch (apiErr: any) {
-          console.error('API upload also failed:', apiErr);
-          throw new Error(`Upload failed: ${apiErr?.message || 'Unknown error'}`);
+          const apiErrMsg = extractErrorMessage(apiErr);
+          console.error('API upload also failed:', apiErrMsg);
+          throw new Error(`Upload failed: ${apiErrMsg}`);
         }
       }
 
@@ -264,7 +268,7 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
       setUploading(false);
       await analyzePhotoHandler(finalPhotoId, finalS3Key);
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+      const errorMessage = extractErrorMessage(err);
       setError(errorMessage);
       setUploading(false);
     }

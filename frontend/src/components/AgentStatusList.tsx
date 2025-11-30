@@ -30,7 +30,7 @@ export function AgentStatusList({ statuses }: AgentStatusListProps) {
                 {state.status.charAt(0).toUpperCase() + state.status.slice(1)}
               </span>
             </div>
-            {state.details && (
+            {state.details && typeof state.details === 'string' && (
               <p className="text-xs text-red-600 mt-2 break-words">Details: {state.details}</p>
             )}
           </div>
