@@ -1,5 +1,8 @@
 FROM public.ecr.aws/lambda/python:3.11
 
+# Set working directory
+WORKDIR ${LAMBDA_TASK_ROOT}
+
 # Copy shared modules first (build context is backend/)
 COPY shared/ ${LAMBDA_TASK_ROOT}/shared/
 

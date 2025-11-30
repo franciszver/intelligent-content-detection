@@ -4,6 +4,7 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as path from 'path';
+import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
 import { CONFIG } from '../config';
 import { StorageStack } from './storage-stack';
@@ -180,6 +181,7 @@ export class ApiStack extends cdk.Stack {
     this.singleAgentFunction = new lambda.DockerImageFunction(this, 'SingleAgentFunction', {
       code: lambda.DockerImageCode.fromImageAsset(backendRoot, {
         file: 'lambda/agent-single/Dockerfile',
+        platform: Platform.LINUX_AMD64, // Lambda requires linux/amd64 architecture
       }),
       memorySize: 1536,
       timeout: cdk.Duration.seconds(180),
