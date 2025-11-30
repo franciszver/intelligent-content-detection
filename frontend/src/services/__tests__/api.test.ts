@@ -28,6 +28,8 @@ import {
   pollDetectionResults,
   analyzePhoto,
   pollWorkflowResults,
+  getSingleAgentResults,
+  pollSingleAgentResults,
 } from '../api';
 
 describe('API Service', () => {
@@ -212,6 +214,44 @@ describe('API Service', () => {
       mockApiInstance.get.mockResolvedValue({ data: failedMetadata });
 
       await expect(pollWorkflowResults('test-photo-id', 1, 0)).rejects.toThrow('Workflow failed');
+    });
+  });
+
+  describe('getSingleAgentResults', () => {
+    it('should fetch single agent payload', async () => {
+      const mockResponse = {
+        data: {
+          photo_id: 'test-photo-id',
+          single_agent_results: { ai_summary: 'All good' },
+        },
+      };
+      mockApiInstance.get.mockResolvedValue(mockResponse);
+
+      const result = await getSingleAgentResults('test-photo-id');
+      expect(result).toEqual(mockResponse.data);
+      expect(mockApiInstance.get).toHaveBeenCalledWith('/photos/test-photo-id/single-agent');
+    });
+  });
+
+  describe('pollSingleAgentResults', () => {
+    it('should poll until results exist', async () => {
+      mockApiInstance.get
+        .mockResolvedValueOnce({ data: { photo_id: 'test-photo-id' } })
+        .mockResolvedValueOnce({
+          data: {
+            photo_id: 'test-photo-id',
+            single_agent_results: { ai_summary: 'done' },
+          },
+        });
+
+      const result = await pollSingleAgentResults('test-photo-id', 2, 0);
+      expect(result.single_agent_results?.ai_summary).toBe('done');
+      expect(mockApiInstance.get).toHaveBeenCalledTimes(2);
+    });
+
+    it('should throw on non-404 errors', async () => {
+      mockApiInstance.get.mockRejectedValue({ response: { status: 500 } });
+      await expect(pollSingleAgentResults('test-photo-id', 1, 0)).rejects.toBeDefined();
     });
   });
 });

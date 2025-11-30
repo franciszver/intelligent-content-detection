@@ -20,7 +20,9 @@ export class ApiStack extends cdk.Stack {
   public readonly agent1Function: lambda.Function;
   public readonly agent2Function: lambda.Function;
   public readonly agent3Function: lambda.Function;
+  public readonly singleAgentFunction: lambda.Function;
   public readonly analyzeTriggerFunction: lambda.Function;
+  public readonly singleAgentResultsFunction: lambda.Function;
 
   constructor(
     scope: Construct,
@@ -341,6 +343,37 @@ export class ApiStack extends cdk.Stack {
       },
     });
 
+    // Single Agent Lambda (YOLO + GPT)
+    this.singleAgentFunction = new lambda.Function(this, 'SingleAgentFunction', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'handler.handler',
+      code: createBundledCode('agent-single', true),
+      layers: [cvLayer],
+      memorySize: 1536,
+      timeout: cdk.Duration.seconds(180),
+      role: sharedLambdaRole,
+      logRetention,
+      environment: {
+        S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
+        DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
+        OPENAI_SECRET_NAME: CONFIG.SECRETS.OPENAI_API_KEY,
+        OPENROUTER_SECRET_NAME: CONFIG.SECRETS.OPENROUTER_API_KEY,
+        REGION: CONFIG.REGION,
+        MODEL_BUCKET_NAME: storageStack.photosBucket.bucketName,
+        YOLO_MODEL_KEY: 'models/yolov8s-roof.onnx',
+        YOLO_CLASS_NAMES: JSON.stringify([
+          'missing_shingles',
+          'cracks',
+          'hail_impact',
+          'granule_loss',
+          'discoloration',
+        ]),
+        SINGLE_AGENT_MODEL_VERSION: 'single-agent-v1',
+        SINGLE_AGENT_OVERLAY_PREFIX: 'single-agent/overlays',
+        SINGLE_AGENT_REPORT_PREFIX: 'single-agent/reports',
+      },
+    });
+
     // Analyze Trigger Lambda (starts Step Functions execution)
     this.analyzeTriggerFunction = new lambda.Function(this, 'AnalyzeTriggerFunction', {
       runtime: lambda.Runtime.PYTHON_3_11,
@@ -354,6 +387,21 @@ export class ApiStack extends cdk.Stack {
         DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
         REGION: CONFIG.REGION,
         STATE_MACHINE_ARN_PARAM: `/${CONFIG.PROJECT_NAME}/state-machine-arn`,
+      },
+    });
+
+    this.singleAgentResultsFunction = new lambda.Function(this, 'SingleAgentResultsFunction', {
+      runtime: lambda.Runtime.PYTHON_3_11,
+      handler: 'handler.handler',
+      code: createBundledCode('single-agent-results'),
+      memorySize: 256,
+      timeout: cdk.Duration.seconds(15),
+      role: sharedLambdaRole,
+      logRetention,
+      environment: {
+        DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
+        S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
+        REGION: CONFIG.REGION,
       },
     });
 
@@ -372,6 +420,10 @@ export class ApiStack extends cdk.Stack {
     // GET /photos/{photoId}/metadata
     const metadataIntegration = new apigateway.LambdaIntegration(this.metadataQueryFunction);
     photoId.addResource('metadata').addMethod('GET', metadataIntegration);
+
+    // GET /photos/{photoId}/single-agent
+    const singleAgentIntegration = new apigateway.LambdaIntegration(this.singleAgentResultsFunction);
+    photoId.addResource('single-agent').addMethod('GET', singleAgentIntegration);
 
     // POST /photos/{photoId}/analyze - Triggers multi-agent analysis via Step Functions
     const analyzeResource = photoId.addResource('analyze');

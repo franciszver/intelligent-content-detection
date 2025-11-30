@@ -2,7 +2,12 @@
  * API service for backend communication
  */
 import axios from 'axios';
-import type { UploadResponse, DetectionResponse, PhotoMetadata } from '../types/detection';
+import type {
+  UploadResponse,
+  DetectionResponse,
+  PhotoMetadata,
+  SingleAgentResultsResponse,
+} from '../types/detection';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
@@ -183,5 +188,38 @@ export async function pollWorkflowResults(
   }
   
   throw new Error('Workflow timeout');
+}
+
+/**
+ * Fetch single-agent results
+ */
+export async function getSingleAgentResults(photoId: string): Promise<SingleAgentResultsResponse> {
+  const response = await api.get<SingleAgentResultsResponse>(`/photos/${photoId}/single-agent`);
+  return response.data;
+}
+
+/**
+ * Poll until single-agent results are available
+ */
+export async function pollSingleAgentResults(
+  photoId: string,
+  maxAttempts: number = 40,
+  intervalMs: number = 2000
+): Promise<SingleAgentResultsResponse> {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const result = await getSingleAgentResults(photoId);
+      if (result.single_agent_results) {
+        return result;
+      }
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status !== 404) {
+        throw err;
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+  throw new Error('Single-agent results timeout');
 }
 

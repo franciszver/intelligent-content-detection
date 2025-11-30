@@ -37,6 +37,7 @@ const orchestrationStack = new OrchestrationStack(
   apiStack.agent1Function,
   apiStack.agent2Function,
   apiStack.agent3Function,
+  apiStack.singleAgentFunction,
   {
     stackName: 'intelligent-content-detection-orchestration',
   }

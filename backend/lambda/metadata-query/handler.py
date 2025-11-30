@@ -104,6 +104,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             'agent3_results': metadata.agent3_results,
             'overlay_s3_key': metadata.overlay_s3_key,
             'report_s3_key': metadata.report_s3_key,
+            'single_agent_results': metadata.single_agent_results,
+            'single_agent_overlay_s3_key': metadata.single_agent_overlay_s3_key,
+            'single_agent_report_s3_key': metadata.single_agent_report_s3_key,
         }
         
         if metadata.user_id:
@@ -122,6 +125,14 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             report_url = generate_presigned_get_url(bucket_name, metadata.report_s3_key, region=region)
             if report_url:
                 response_data['report_url'] = report_url
+        if bucket_name and metadata.single_agent_overlay_s3_key:
+            single_overlay = generate_presigned_get_url(bucket_name, metadata.single_agent_overlay_s3_key, region=region)
+            if single_overlay:
+                response_data['single_agent_overlay_url'] = single_overlay
+        if bucket_name and metadata.single_agent_report_s3_key:
+            single_report = generate_presigned_get_url(bucket_name, metadata.single_agent_report_s3_key, region=region)
+            if single_report:
+                response_data['single_agent_report_url'] = single_report
         
         # Convert any Decimal types to float/int for JSON serialization
         # This must be done AFTER all data is added to response_data

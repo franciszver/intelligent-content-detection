@@ -83,6 +83,31 @@ export interface PhotoMetadata {
   report_s3_key?: string;
   overlay_url?: string;
   report_url?: string;
+  single_agent_results?: SingleAgentResult;
+  single_agent_overlay_s3_key?: string;
+  single_agent_report_s3_key?: string;
+  single_agent_overlay_url?: string;
+  single_agent_report_url?: string;
+}
+
+export interface SingleAgentResult {
+  model_version?: string;
+  damage_areas?: DamageArea[];
+  damage_counts?: Record<string, number>;
+  ai_summary?: string;
+  ai_recommendations?: string;
+  ai_provider?: string;
+  processing_time_ms?: number;
+  gpt_response?: Record<string, unknown>;
+}
+
+export interface SingleAgentResultsResponse {
+  photo_id: string;
+  single_agent_results?: SingleAgentResult;
+  single_agent_overlay_key?: string;
+  single_agent_report_key?: string;
+  single_agent_overlay_url?: string;
+  single_agent_report_url?: string;
 }
 
 export interface UploadResponse {

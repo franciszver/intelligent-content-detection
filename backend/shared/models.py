@@ -59,6 +59,18 @@ class OverlayAnalysis(BaseModel):
     damage_summary: Optional[Dict[str, Any]] = Field(None, description="Summary statistics")
 
 
+class SingleAgentResult(BaseModel):
+    """Single agent (YOLO + GPT) analysis output"""
+    model_version: Optional[str] = Field(None, description="Model identifier/version")
+    damage_areas: List[Dict[str, Any]] = Field(default_factory=list, description="Detections returned by the single agent")
+    damage_counts: Dict[str, int] = Field(default_factory=dict, description="Damage counts by type")
+    ai_summary: Optional[str] = Field(None, description="GPT-generated summary text")
+    ai_recommendations: Optional[str] = Field(None, description="Recommended remediation actions")
+    ai_provider: Optional[str] = Field(None, description="Provider used for summary (openai, openrouter, etc.)")
+    gpt_response: Optional[Dict[str, Any]] = Field(None, description="Raw structured GPT response")
+    processing_time_ms: Optional[int] = Field(None, description="End-to-end processing duration")
+
+
 class Detection(BaseModel):
     """Detection result for roof damage"""
     type: str = Field(..., description="Detection type (e.g., 'roof_damage')")
@@ -96,6 +108,9 @@ class PhotoMetadata(BaseModel):
     agent3_results: Optional[Dict[str, Any]] = Field(None, description="Overlay analysis results")
     overlay_s3_key: Optional[str] = Field(None, description="S3 key for overlay image")
     report_s3_key: Optional[str] = Field(None, description="S3 key for damage report")
+    single_agent_results: Optional[Dict[str, Any]] = Field(None, description="Single-agent analysis results")
+    single_agent_overlay_s3_key: Optional[str] = Field(None, description="S3 key for single-agent overlay image")
+    single_agent_report_s3_key: Optional[str] = Field(None, description="S3 key for single-agent report JSON")
 
     def to_dynamodb_item(self) -> Dict[str, Any]:
         """Convert to DynamoDB item format, converting floats to Decimals"""
@@ -137,6 +152,12 @@ class PhotoMetadata(BaseModel):
             item['overlay_s3_key'] = self.overlay_s3_key
         if self.report_s3_key:
             item['report_s3_key'] = self.report_s3_key
+        if self.single_agent_results:
+            item['single_agent_results'] = convert_floats(self.single_agent_results)
+        if self.single_agent_overlay_s3_key:
+            item['single_agent_overlay_s3_key'] = self.single_agent_overlay_s3_key
+        if self.single_agent_report_s3_key:
+            item['single_agent_report_s3_key'] = self.single_agent_report_s3_key
         return item
 
     @classmethod

@@ -20,6 +20,7 @@ export class OrchestrationStack extends cdk.Stack {
     agent1Function: lambda.Function,
     agent2Function: lambda.Function,
     agent3Function: lambda.Function,
+    singleAgentFunction: lambda.Function,
     props?: cdk.StackProps
   ) {
     super(scope, id, {
@@ -176,11 +177,81 @@ export class OrchestrationStack extends cdk.Stack {
       }
     );
 
+    // Single Agent branch
+    const singleAgentTask = new stepfunctionsTasks.LambdaInvoke(this, 'SingleAgentTask', {
+      lambdaFunction: singleAgentFunction,
+      payloadResponseOnly: true,
+    });
+    const singleAgentStatus = new stepfunctionsTasks.LambdaInvoke(this, 'SingleAgentStatus', {
+      lambdaFunction: orchestratorFunction,
+      payloadResponseOnly: true,
+      resultPath: stepfunctions.JsonPath.DISCARD,
+      payload: stepfunctions.TaskInput.fromObject({
+        'photo_id.$': '$.photo_id',
+        status_update: {
+          event: 'agent',
+          stage: 'single-agent',
+          status: 'completed',
+          'timestamp.$': '$$.State.EnteredTime',
+          'results.$': '$.single_agent_summary',
+        },
+      }),
+    });
+    const singleAgentFailureNotify = new stepfunctionsTasks.LambdaInvoke(this, 'SingleAgentFailure', {
+      lambdaFunction: orchestratorFunction,
+      payloadResponseOnly: true,
+      resultPath: stepfunctions.JsonPath.DISCARD,
+      payload: stepfunctions.TaskInput.fromObject({
+        'photo_id.$': '$.photo_id',
+        status_update: {
+          event: 'agent',
+          stage: 'single-agent',
+          status: 'failed',
+          'error.$': '$.error',
+          'timestamp.$': '$$.State.EnteredTime',
+        },
+      }),
+    });
+    singleAgentTask.addCatch(
+      singleAgentFailureNotify.next(new stepfunctions.Fail(this, 'SingleAgentFailed')),
+      {
+        resultPath: '$.error',
+      }
+    );
+
+    const multiAgentChain = stepfunctions.Chain.start(parallelAgents).next(agent3Task).next(agent3Status);
+    const singleAgentChain = stepfunctions.Chain.start(singleAgentTask).next(singleAgentStatus);
+
+    const workflowBranches = new stepfunctions.Parallel(this, 'WorkflowBranches', {
+      comment: 'Run multi-agent pipeline in parallel with the single-agent pipeline',
+      resultPath: '$.workflowResults',
+      resultSelector: {
+        'multi_agent.$': '$[0]',
+        'single_agent.$': '$[1]',
+      },
+    });
+    workflowBranches.branch(multiAgentChain);
+    workflowBranches.branch(singleAgentChain);
+
+    const finalStatus = new stepfunctionsTasks.LambdaInvoke(this, 'WorkflowCompleteStatus', {
+      lambdaFunction: orchestratorFunction,
+      payloadResponseOnly: true,
+      resultPath: stepfunctions.JsonPath.DISCARD,
+      payload: stepfunctions.TaskInput.fromObject({
+        'photo_id.$': '$.photo_id',
+        status_update: {
+          event: 'workflow',
+          stage: 'orchestrator',
+          status: 'completed',
+          'timestamp.$': '$$.State.EnteredTime',
+        },
+      }),
+    });
+
     // Define the state machine definition
     const definition = orchestratorTask
-      .next(parallelAgents)
-      .next(agent3Task)
-      .next(agent3Status);
+      .next(workflowBranches)
+      .next(finalStatus);
 
     // Create the state machine
     this.stateMachine = new stepfunctions.StateMachine(this, 'MultiAgentStateMachine', {
@@ -195,6 +266,7 @@ export class OrchestrationStack extends cdk.Stack {
     agent1Function.grantInvoke(this.stateMachine.role);
     agent2Function.grantInvoke(this.stateMachine.role);
     agent3Function.grantInvoke(this.stateMachine.role);
+    singleAgentFunction.grantInvoke(this.stateMachine.role);
 
     // Note: Step Functions start execution permission is granted in ApiStack
     // to avoid circular dependency

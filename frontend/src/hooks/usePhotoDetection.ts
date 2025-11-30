@@ -2,10 +2,18 @@
  * React hook for photo detection workflow
  */
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { getUploadUrl, uploadPhotoToS3, uploadPhotoViaApi, analyzePhoto, pollWorkflowResults } from '../services/api';
-import type { PhotoMetadata, UploadResponse } from '../types/detection';
+import {
+  getUploadUrl,
+  uploadPhotoToS3,
+  uploadPhotoViaApi,
+  analyzePhoto,
+  pollWorkflowResults,
+  getSingleAgentResults,
+  pollSingleAgentResults,
+} from '../services/api';
+import type { PhotoMetadata, SingleAgentResultsResponse, UploadResponse } from '../types/detection';
 
-type AgentStage = 'orchestrator' | 'agent1' | 'agent2' | 'agent3';
+type AgentStage = 'orchestrator' | 'agent1' | 'agent2' | 'agent3' | 'single';
 type AgentStatusValue = 'idle' | 'pending' | 'running' | 'completed' | 'failed';
 
 interface AgentStatusState {
@@ -21,6 +29,7 @@ const STAGE_LABELS: Record<AgentStage, string> = {
   agent1: 'Wireframe Agent',
   agent2: 'Color Agent',
   agent3: 'Overlay Agent',
+  single: 'Single Agent',
 };
 
 const createInitialStatuses = (): AgentStatusMap => ({
@@ -28,6 +37,7 @@ const createInitialStatuses = (): AgentStatusMap => ({
   agent1: { label: STAGE_LABELS.agent1, status: 'idle' },
   agent2: { label: STAGE_LABELS.agent2, status: 'idle' },
   agent3: { label: STAGE_LABELS.agent3, status: 'idle' },
+  single: { label: STAGE_LABELS.single, status: 'idle' },
 });
 
 interface UsePhotoDetectionReturn {
@@ -39,6 +49,10 @@ interface UsePhotoDetectionReturn {
   analyzePhoto: (photoId: string, s3Key?: string) => Promise<void>;
   reset: () => void;
   agentStatuses: AgentStatusMap;
+  singleAgentResults: SingleAgentResultsResponse | null;
+  singleAgentLoading: boolean;
+  singleAgentError: string | null;
+  refreshSingleAgent: (photoId?: string) => Promise<void>;
 }
 
 export function usePhotoDetection(): UsePhotoDetectionReturn {
@@ -47,6 +61,9 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
   const [metadata, setMetadata] = useState<PhotoMetadata | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [agentStatuses, setAgentStatuses] = useState<AgentStatusMap>(createInitialStatuses);
+  const [singleAgentResults, setSingleAgentResults] = useState<SingleAgentResultsResponse | null>(null);
+  const [singleAgentLoading, setSingleAgentLoading] = useState(false);
+  const [singleAgentError, setSingleAgentError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const currentPhotoRef = useRef<string | null>(null);
   const websocketUrl = import.meta.env.VITE_WS_BASE_URL as string | undefined;
@@ -66,11 +83,21 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
     currentPhotoRef.current = null;
   }, []);
 
+  const normalizeStage = useCallback((stage?: string): AgentStage | undefined => {
+    if (!stage) return undefined;
+    if (stage === 'single-agent') return 'single';
+    if (stage === 'workflow') return 'orchestrator';
+    if ((['orchestrator', 'agent1', 'agent2', 'agent3', 'single'] as const).includes(stage as AgentStage)) {
+      return stage as AgentStage;
+    }
+    return undefined;
+  }, []);
+
   const handleWebsocketMessage = useCallback(
     (event: MessageEvent) => {
       try {
         const payload = JSON.parse(event.data);
-        const stage = payload.stage as AgentStage | undefined;
+        const stage = normalizeStage(payload.stage);
         if (stage && STAGE_LABELS[stage]) {
           const status = (payload.status || 'running') as AgentStatusValue;
           const details = payload.error || undefined;
@@ -85,7 +112,7 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
         console.warn('Failed to parse websocket payload', err);
       }
     },
-    [updateAgentStatus]
+    [normalizeStage, updateAgentStatus]
   );
 
   const connectWebsocket = useCallback(
@@ -107,6 +134,7 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
         updateAgentStatus('agent1', 'pending');
         updateAgentStatus('agent2', 'pending');
         updateAgentStatus('agent3', 'pending');
+        updateAgentStatus('single', 'pending');
       };
 
       socket.onmessage = handleWebsocketMessage;
@@ -128,11 +156,42 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
     };
   }, [disconnectWebsocket]);
 
+  const fetchSingleAgentResults = useCallback(
+    async (photoId?: string, poll = false) => {
+      const targetId = photoId || currentPhotoRef.current;
+      if (!targetId) {
+        return;
+      }
+      setSingleAgentLoading(true);
+      setSingleAgentError(null);
+      try {
+        const results = poll
+          ? await pollSingleAgentResults(targetId)
+          : await getSingleAgentResults(targetId);
+        setSingleAgentResults(results);
+        updateAgentStatus('single', 'completed');
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : 'Failed to load single-agent data';
+        setSingleAgentError(errorMessage);
+        updateAgentStatus('single', 'failed', errorMessage);
+        if (poll) {
+          throw err;
+        }
+      } finally {
+        setSingleAgentLoading(false);
+      }
+    },
+    [updateAgentStatus]
+  );
+
   const analyzePhotoHandler = useCallback(async (photoId: string, s3Key?: string) => {
     try {
       setError(null);
       setAnalyzing(true);
       setAgentStatuses(createInitialStatuses());
+      setSingleAgentResults(null);
+      setSingleAgentError(null);
+      currentPhotoRef.current = photoId;
 
       if (websocketUrl) {
         connectWebsocket(photoId);
@@ -141,6 +200,7 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
         updateAgentStatus('agent1', 'pending');
         updateAgentStatus('agent2', 'pending');
         updateAgentStatus('agent3', 'pending');
+        updateAgentStatus('single', 'pending');
       }
 
       // Trigger multi-agent analysis
@@ -149,6 +209,12 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
       // Poll for results
       const result = await pollWorkflowResults(photoId);
       setMetadata(result);
+      try {
+        updateAgentStatus('single', 'running');
+        await fetchSingleAgentResults(photoId, true);
+      } catch {
+        // error handled inside fetchSingleAgentResults
+      }
       if (!websocketUrl) {
         updateAgentStatus('agent1', 'completed');
         updateAgentStatus('agent2', 'completed');
@@ -163,7 +229,7 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
       setAnalyzing(false);
       disconnectWebsocket();
     }
-  }, [connectWebsocket, disconnectWebsocket, updateAgentStatus, websocketUrl]);
+  }, [connectWebsocket, disconnectWebsocket, fetchSingleAgentResults, updateAgentStatus, websocketUrl]);
 
   const uploadPhoto = useCallback(async (file: File, userId?: string) => {
     try {
@@ -210,8 +276,10 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
     setUploading(false);
     setAnalyzing(false);
     setAgentStatuses(createInitialStatuses());
+    setSingleAgentResults(null);
+    setSingleAgentError(null);
     disconnectWebsocket();
-  }, []);
+  }, [disconnectWebsocket]);
 
   return {
     uploading,
@@ -222,6 +290,10 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
     analyzePhoto: analyzePhotoHandler,
     reset,
     agentStatuses,
+    singleAgentResults,
+    singleAgentLoading,
+    singleAgentError,
+    refreshSingleAgent: (photoId?: string) => fetchSingleAgentResults(photoId, false),
   };
 }
 

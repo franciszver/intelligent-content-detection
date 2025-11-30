@@ -9,6 +9,14 @@ vi.mock('../../services/api');
 describe('usePhotoDetection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(api.pollSingleAgentResults).mockResolvedValue({
+      photo_id: 'test-photo-id',
+      single_agent_results: { ai_summary: 'done' },
+    } as any);
+    vi.mocked(api.getSingleAgentResults).mockResolvedValue({
+      photo_id: 'test-photo-id',
+      single_agent_results: { ai_summary: 'done' },
+    } as any);
   });
 
   it('should initialize with default state', () => {
@@ -56,6 +64,7 @@ describe('usePhotoDetection', () => {
     expect(api.uploadPhotoToS3).toHaveBeenCalledWith(mockUploadResponse.upload_url, mockFile);
     expect(api.analyzePhoto).toHaveBeenCalledWith('test-photo-id', 'photos/test.jpg');
     expect(api.pollWorkflowResults).toHaveBeenCalledWith('test-photo-id');
+    expect(api.pollSingleAgentResults).toHaveBeenCalledWith('test-photo-id', 40, 2000);
   });
 
   it('should fallback to API upload on S3 upload error', async () => {
@@ -96,6 +105,7 @@ describe('usePhotoDetection', () => {
 
     expect(api.uploadPhotoViaApi).toHaveBeenCalledWith('user-123', mockFile);
     expect(api.analyzePhoto).toHaveBeenCalledWith('test-photo-id-api', 'photos/test-api.jpg');
+    expect(api.pollSingleAgentResults).toHaveBeenCalledWith('test-photo-id-api', 40, 2000);
   });
 
   it('should handle upload errors', async () => {
@@ -178,6 +188,15 @@ describe('usePhotoDetection', () => {
 
     expect(api.analyzePhoto).toHaveBeenCalledWith('test-photo-id', 'photos/test.jpg');
     expect(api.pollWorkflowResults).toHaveBeenCalledWith('test-photo-id');
+    expect(api.pollSingleAgentResults).toHaveBeenCalledWith('test-photo-id', 40, 2000);
+  });
+
+  it('should refresh single agent results on demand', async () => {
+    const { result } = renderHook(() => usePhotoDetection());
+    await result.current.refreshSingleAgent('manual-photo');
+    await waitFor(() => {
+      expect(api.getSingleAgentResults).toHaveBeenCalledWith('manual-photo');
+    });
   });
 });
 
