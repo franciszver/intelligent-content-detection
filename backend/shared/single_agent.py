@@ -131,17 +131,33 @@ def run_yolo_inference(
 
     input_name = session.get_inputs()[0].name
     outputs = session.run(None, {input_name: input_data})
-    predictions = outputs[0][0]  # (N, 4 + num_classes + obj)
+    
+    # Handle different YOLO output formats
+    raw_output = outputs[0]
+    
+    # YOLOv8 outputs shape (1, num_classes+4, num_detections) and needs transpose
+    # YOLOv5 outputs shape (1, num_detections, num_classes+5)
+    if len(raw_output.shape) == 3:
+        if raw_output.shape[1] < raw_output.shape[2]:
+            # YOLOv8 format: (1, 84, 8400) -> transpose to (8400, 84)
+            predictions = raw_output[0].T
+        else:
+            # YOLOv5 format: (1, 8400, 85) -> (8400, 85)
+            predictions = raw_output[0]
+    else:
+        predictions = raw_output[0]
 
     boxes = predictions[:, :4]
-    objectness = predictions[:, 4]
-    class_scores = predictions[:, 5:]
+    class_scores = predictions[:, 4:]  # YOLOv8 has no separate objectness
+    
     if class_scores.size == 0:
         return []
 
     class_indices = np.argmax(class_scores, axis=1)
-    class_conf = class_scores[np.arange(class_scores.shape[0]), class_indices]
-    scores = objectness * class_conf
+    scores = class_scores[np.arange(class_scores.shape[0]), class_indices]
+    
+    # Ensure scores are in valid range [0, 1]
+    scores = np.clip(scores, 0.0, 1.0)
 
     valid = scores >= conf_threshold
     if not np.any(valid):
