@@ -1,5 +1,5 @@
 /**
- * Component to visualize damage with bounding boxes on image
+ * Component to visualize damage with bounding boxes on image (dark theme)
  * Supports both direct detections and overlay from S3
  */
 import { useEffect, useRef, useState } from 'react';
@@ -46,13 +46,14 @@ export function DamageVisualization({ imageUrl, detections = [], overlayUrl }: D
           const [x1, y1, x2, y2] = detection.bbox;
 
           // Draw rectangle
-          ctx.strokeStyle = detection.category === 'hail' ? '#ef4444' :
-            detection.category === 'wind' ? '#f59e0b' : '#8b5cf6';
+          const category = detection.category || 'unknown';
+          ctx.strokeStyle = category === 'hail' ? '#ef4444' :
+            category === 'wind' ? '#f59e0b' : '#8b5cf6';
           ctx.lineWidth = 3;
           ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
 
           // Draw label background
-          const label = `${detection.category} (${(detection.confidence * 100).toFixed(0)}%)`;
+          const label = `${category} (${((detection.confidence ?? 0) * 100).toFixed(0)}%)`;
           ctx.font = '14px Arial';
           const textMetrics = ctx.measureText(label);
           const textHeight = 20;
@@ -83,32 +84,32 @@ export function DamageVisualization({ imageUrl, detections = [], overlayUrl }: D
       <div className="relative inline-block w-full">
         <canvas
           ref={canvasRef}
-          className="max-w-full h-auto border border-gray-200 rounded-lg"
+          className="max-w-full h-auto border border-slate-700 rounded-xl"
           style={{ display: imageLoaded ? 'block' : 'none' }}
         />
         {!imageLoaded && (
-          <div className="w-full h-64 bg-gray-100 rounded-lg flex items-center justify-center">
-            <p className="text-gray-500">Loading image...</p>
+          <div className="w-full h-64 bg-slate-800 rounded-xl flex items-center justify-center">
+            <p className="text-slate-400">Loading image...</p>
           </div>
         )}
 
         {detections.length === 0 && imageLoaded && (
-          <div className="absolute inset-0 flex items-center justify-center bg-gray-100 bg-opacity-50 rounded-lg pointer-events-none">
-            <p className="text-gray-600">No damage detected</p>
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50 rounded-xl pointer-events-none">
+            <p className="text-slate-300">No damage detected</p>
           </div>
         )}
 
         {overlayUrl && showOverlay && (
           <>
             {!overlayLoaded && (
-              <div className="absolute inset-0 flex items-center justify-center bg-gray-900 bg-opacity-20 rounded-lg pointer-events-none">
-                <p className="text-white text-sm">Loading overlay...</p>
+              <div className="absolute inset-0 flex items-center justify-center bg-slate-900/50 rounded-xl pointer-events-none">
+                <p className="text-slate-300 text-sm">Loading overlay...</p>
               </div>
             )}
             <img
               src={overlayUrl}
               alt="Damage Overlay"
-              className="absolute inset-0 w-full h-full object-contain rounded-lg pointer-events-none opacity-65 mix-blend-multiply"
+              className="absolute inset-0 w-full h-full object-contain rounded-xl pointer-events-none opacity-65 mix-blend-multiply"
               onLoad={() => setOverlayLoaded(true)}
             />
           </>
@@ -119,7 +120,7 @@ export function DamageVisualization({ imageUrl, detections = [], overlayUrl }: D
         <button
           type="button"
           onClick={() => setShowOverlay((prev) => !prev)}
-          className="text-sm px-3 py-1 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 transition"
+          className="text-sm px-4 py-2 rounded-lg border border-slate-600 text-slate-300 hover:bg-slate-700/50 hover:text-white transition-colors"
         >
           {showOverlay ? 'Hide overlay' : 'Show overlay'}
         </button>
@@ -127,4 +128,3 @@ export function DamageVisualization({ imageUrl, detections = [], overlayUrl }: D
     </div>
   );
 }
-
