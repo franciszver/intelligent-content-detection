@@ -160,14 +160,19 @@ export class ApiStack extends cdk.Stack {
     // Lambda Log Groups with 7-day retention
     const logRetention = logs.RetentionDays.ONE_WEEK;
 
-    // Create shared IAM role for all Lambda functions to reduce role count
-    const sharedLambdaRole = new iam.Role(this, 'SharedLambdaRole', {
-      assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-      managedPolicies: [
-        iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-      ],
-      description: 'Shared IAM role for all Lambda functions in the API stack',
-    });
+    // Re-use existing IAM role if provided to stay within IAM quotas
+    const existingLambdaRoleArn =
+      process.env.EXISTING_LAMBDA_ROLE_ARN || this.node.tryGetContext('existingLambdaRoleArn');
+
+    const sharedLambdaRole: iam.IRole = existingLambdaRoleArn
+      ? iam.Role.fromRoleArn(this, 'SharedLambdaRole', existingLambdaRoleArn)
+      : new iam.Role(this, 'SharedLambdaRole', {
+        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
+        managedPolicies: [
+          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
+        ],
+        description: 'Shared IAM role for all Lambda functions in the API stack',
+      });
 
     // Grant permissions to shared role
     storageStack.photosBucket.grantReadWrite(sharedLambdaRole);
