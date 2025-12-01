@@ -182,13 +182,9 @@ def run_yolo_inference(
 
     keep_indices = _nms(boxes_xyxy, scores, iou_threshold)
 
-    default_classes = [
-        "missing_shingles",
-        "cracks",
-        "hail_impact",
-        "granule_loss",
-        "discoloration",
-    ]
+    # HuggingFace jobejaranom/yolo-roof-damage model has single class "item"
+    # We rename it to "roof_damage" for better UX
+    default_classes = ["roof_damage"]
     labels = class_names or default_classes
 
     detections: List[Dict[str, Any]] = []

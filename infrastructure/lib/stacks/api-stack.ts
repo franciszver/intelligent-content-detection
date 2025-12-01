@@ -193,7 +193,7 @@ export class ApiStack extends cdk.Stack {
     );
     this.singleAgentFunction = new lambda.DockerImageFunction(this, 'SingleAgentFunction', {
       code: lambda.DockerImageCode.fromEcr(singleAgentRepo, {
-        tagOrDigest: 'v20251130-200630',
+        tagOrDigest: 'v20251130-201613',
       }),
       memorySize: 1536,
       timeout: cdk.Duration.seconds(180),
@@ -277,6 +277,7 @@ export class ApiStack extends cdk.Stack {
 
   }
 }
+
 
 
 
