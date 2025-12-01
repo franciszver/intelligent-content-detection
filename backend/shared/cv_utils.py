@@ -182,6 +182,100 @@ def detect_exposed_underlayment_cv(image_bytes: bytes, min_area: int = 300) -> L
     return results
 
 
+def detect_dark_patches_cv(image_bytes: bytes, min_area: int = 250) -> List[Dict[str, Any]]:
+    """
+    Detect dark patches (black/dark gray exposed areas) which indicate missing shingles
+    or exposed tar paper/dark underlayment. Very common damage pattern.
+    """
+    _ensure_cv2_available()
+    _ensure_numpy_available()
+
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        return []
+
+    height, width = img.shape[:2]
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # Calculate image statistics to adapt thresholds
+    mean_brightness = np.mean(gray)
+    
+    # Dark patch detection - low value (brightness) in HSV
+    # Adjust threshold based on overall image brightness
+    dark_threshold = max(40, min(80, int(mean_brightness * 0.4)))
+    
+    # Range 1: Very dark areas (black tar paper, deep shadows in gaps)
+    lower_dark1 = np.array([0, 0, 0])
+    upper_dark1 = np.array([180, 255, dark_threshold])
+    mask_dark = cv2.inRange(hsv, lower_dark1, upper_dark1)
+
+    # Range 2: Dark gray areas
+    lower_dark2 = np.array([0, 0, dark_threshold])
+    upper_dark2 = np.array([180, 60, dark_threshold + 40])
+    mask_gray = cv2.inRange(hsv, lower_dark2, upper_dark2)
+
+    # Combine masks
+    mask = cv2.bitwise_or(mask_dark, mask_gray)
+
+    # Use adaptive thresholding on grayscale to find locally dark regions
+    # This helps find dark patches relative to surrounding shingles
+    blur = cv2.GaussianBlur(gray, (21, 21), 0)
+    adaptive_dark = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 15
+    )
+    
+    # Combine with color-based detection
+    mask = cv2.bitwise_or(mask, adaptive_dark)
+
+    # Morphological operations to clean up and connect nearby dark regions
+    kernel_small = cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5))
+    kernel_large = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 9))
+    
+    # Close gaps between nearby dark patches
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel_large, iterations=2)
+    # Remove noise
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel_small, iterations=1)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    results: List[Dict[str, Any]] = []
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < min_area:
+            continue
+
+        x, y, w, h = cv2.boundingRect(contour)
+        
+        # Filter out very thin or very wide detections (likely edges, not gaps)
+        aspect_ratio = w / float(h) if h > 0 else 0
+        if aspect_ratio < 0.15 or aspect_ratio > 8:
+            continue
+
+        bbox = _clamp_bbox([x, y, x + w, y + h], width, height)
+
+        # Calculate how dark this region actually is
+        roi = gray[y:y+h, x:x+w]
+        if roi.size > 0:
+            region_darkness = 1.0 - (np.mean(roi) / 255.0)
+        else:
+            region_darkness = 0.5
+
+        # Confidence based on size and darkness
+        size_factor = min(1.0, (area / (width * height)) * 15)
+        confidence = float(min(0.88, 0.45 + (size_factor * 0.25) + (region_darkness * 0.2)))
+
+        results.append({
+            "bbox": bbox,
+            "confidence": confidence,
+            "damage_type": "missing_shingles",
+            "source": "cv_dark_patch"
+        })
+
+    return results
+
+
 def detect_discoloration_cv(image_bytes: bytes, min_area: int = 600) -> List[Dict[str, Any]]:
     """Detect discoloration or staining using LAB color analysis."""
     _ensure_cv2_available()

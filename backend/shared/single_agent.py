@@ -11,6 +11,7 @@ from .cv_utils import (
     detect_discoloration_cv,
     detect_exposed_underlayment_cv,
     detect_missing_shingles_cv,
+    detect_dark_patches_cv,
     merge_damage_areas,
     filter_large_damage_areas,
 )
@@ -420,6 +421,10 @@ def enrich_with_cv(
     # Detect exposed underlayment (tan/brown patches - very common damage indicator)
     cv_underlayment = detect_exposed_underlayment_cv(image_bytes, min_area=min_area_underlayment)
     merged = merge_damage_areas(merged, cv_underlayment, iou_threshold=0.3)
+
+    # Detect dark patches (black/dark gray exposed areas - tar paper, gaps)
+    cv_dark_patches = detect_dark_patches_cv(image_bytes, min_area=250)
+    merged = merge_damage_areas(merged, cv_dark_patches, iou_threshold=0.35)
 
     # Filter all detections by location (remove sky, edges, non-roof areas)
     if filter_by_roof:
