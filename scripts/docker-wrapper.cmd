@@ -3,9 +3,9 @@ setlocal enabledelayedexpansion
 set CMD=%1
 shift
 if /I "%CMD%"=="build" (
-  set DOCKER_DEFAULT_PLATFORM=linux/amd64
-  set BUILDX_NO_DEFAULT_ATTESTATIONS=1
-  cmd /c "docker buildx build --platform=linux/amd64 --provenance=false --sbom=false %* --output type=docker,dest=- | docker load"
+  REM Force classic Docker build (no BuildKit) to produce Docker V2 manifest Lambda requires
+  set DOCKER_BUILDKIT=0
+  docker build --platform=linux/amd64 %*
   exit /b %errorlevel%
 ) else (
   docker %CMD% %*

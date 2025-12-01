@@ -18,3 +18,5 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # Set the CMD to your handler
 CMD [ "handler.handler" ]
 
+# Force rebuild - Lambda requires Docker V2 manifest format
+

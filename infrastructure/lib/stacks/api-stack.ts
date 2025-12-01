@@ -211,6 +211,7 @@ export class ApiStack extends cdk.Stack {
 
     // Single Agent Lambda (YOLO + GPT) - packaged as a Docker image to avoid Lambda zip size limits
     // Build context is backend/ so Dockerfile can access both lambda/agent-single and shared/
+    // CDK_DOCKER is set globally above to use docker-wrapper script for Lambda-compatible builds
     this.singleAgentFunction = withDockerWrapper(
       () =>
         new lambda.DockerImageFunction(this, 'SingleAgentFunction', {
