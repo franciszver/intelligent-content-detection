@@ -75,6 +75,164 @@ def _clip_box(box: Sequence[float], width: int, height: int) -> List[int]:
     return [x1, y1, x2, y2]
 
 
+def detect_roof_boundary(img: "np.ndarray") -> Optional["np.ndarray"]:
+    """
+    Detect the roof region using HSV color segmentation.
+    Returns a binary mask where roof pixels are 255, background is 0.
+    Falls back to excluding top 15% of image if no roof colors detected.
+    """
+    _ensure_np_cv()
+    h, w = img.shape[:2]
+    
+    # Convert to HSV for color-based segmentation
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    
+    # Detect sky regions (high brightness, low saturation, blue-ish hue)
+    # Sky typically has H: 90-130, S: 0-80, V: 150-255
+    sky_mask = cv2.inRange(hsv, (90, 0, 150), (130, 80, 255))
+    
+    # Also detect very bright areas (overexposed sky)
+    bright_mask = cv2.inRange(hsv, (0, 0, 200), (180, 40, 255))
+    sky_mask = cv2.bitwise_or(sky_mask, bright_mask)
+    
+    # Detect common roof colors:
+    # Gray shingles: low saturation, medium value
+    gray_roof = cv2.inRange(hsv, (0, 0, 40), (180, 60, 180))
+    # Brown/tan shingles: warm hues, medium saturation
+    brown_roof = cv2.inRange(hsv, (5, 30, 40), (25, 180, 200))
+    # Dark shingles (black/dark gray)
+    dark_roof = cv2.inRange(hsv, (0, 0, 20), (180, 80, 100))
+    # Red/terracotta tiles
+    red_roof = cv2.inRange(hsv, (0, 50, 50), (15, 200, 200))
+    
+    # Combine all roof-like colors
+    roof_colors = cv2.bitwise_or(gray_roof, brown_roof)
+    roof_colors = cv2.bitwise_or(roof_colors, dark_roof)
+    roof_colors = cv2.bitwise_or(roof_colors, red_roof)
+    
+    # Start with the color-based roof detection
+    roof_mask = roof_colors.copy()
+    
+    # Remove sky regions
+    roof_mask = cv2.bitwise_and(roof_mask, cv2.bitwise_not(sky_mask))
+    
+    # Apply morphological operations to clean up
+    kernel_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    roof_mask = cv2.morphologyEx(roof_mask, cv2.MORPH_CLOSE, kernel_close)
+    
+    kernel_open = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (10, 10))
+    roof_mask = cv2.morphologyEx(roof_mask, cv2.MORPH_OPEN, kernel_open)
+    
+    # Find the largest contour (likely the main roof)
+    contours, _ = cv2.findContours(roof_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours:
+        # Fallback: assume center region is roof, exclude top 15% (sky)
+        fallback_mask = np.zeros((h, w), dtype=np.uint8)
+        fallback_mask[int(h * 0.15):, :] = 255
+        return fallback_mask
+    
+    # Keep contours that are reasonably large (> 5% of image area)
+    min_area = h * w * 0.05
+    large_contours = [c for c in contours if cv2.contourArea(c) > min_area]
+    
+    if not large_contours:
+        # Fallback mask
+        fallback_mask = np.zeros((h, w), dtype=np.uint8)
+        fallback_mask[int(h * 0.15):, :] = 255
+        return fallback_mask
+    
+    # Create final mask from large contours
+    final_mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.drawContours(final_mask, large_contours, -1, 255, -1)
+    
+    # Expand mask slightly to include edges
+    final_mask = cv2.dilate(final_mask, kernel_close, iterations=1)
+    
+    return final_mask
+
+
+def filter_detections_by_location(
+    detections: List[Dict[str, Any]],
+    img_width: int,
+    img_height: int,
+    roof_mask: Optional["np.ndarray"] = None,
+    top_margin_pct: float = 0.12,
+    edge_margin_pct: float = 0.03,
+    min_roof_overlap_pct: float = 0.3,
+) -> List[Dict[str, Any]]:
+    """
+    Filter detections based on location heuristics:
+    - Remove detections in top portion of image (likely sky)
+    - Remove detections too close to edges
+    - If roof_mask provided, only keep detections with sufficient overlap
+    
+    Args:
+        detections: List of detection dicts with 'bbox' key
+        img_width, img_height: Image dimensions
+        roof_mask: Optional binary mask of roof region
+        top_margin_pct: Fraction of image height to exclude from top (sky filter)
+        edge_margin_pct: Fraction of image to exclude from edges
+        min_roof_overlap_pct: Minimum overlap with roof mask to keep detection
+    
+    Returns:
+        Filtered list of detections
+    """
+    _ensure_np_cv()
+    
+    top_cutoff = int(img_height * top_margin_pct)
+    edge_margin = int(min(img_width, img_height) * edge_margin_pct)
+    
+    filtered = []
+    for det in detections:
+        bbox = det.get("bbox", [0, 0, 0, 0])
+        x1, y1, x2, y2 = bbox
+        
+        # Calculate detection center
+        cx = (x1 + x2) / 2
+        cy = (y1 + y2) / 2
+        
+        # Skip if center is in top margin (sky)
+        if cy < top_cutoff:
+            continue
+        
+        # Skip if center is too close to edges
+        if cx < edge_margin or cx > (img_width - edge_margin):
+            continue
+        if cy > (img_height - edge_margin):  # bottom edge
+            continue
+        
+        # If roof mask provided, check overlap
+        if roof_mask is not None:
+            # Use integer coordinates consistently for area calculation
+            ix1, iy1 = max(0, int(x1)), max(0, int(y1))
+            ix2, iy2 = min(img_width, int(x2)), min(img_height, int(y2))
+            
+            det_width = ix2 - ix1
+            det_height = iy2 - iy1
+            if det_width <= 0 or det_height <= 0:
+                continue
+            
+            det_area = det_width * det_height
+            
+            # Extract detection region from mask
+            mask_region = roof_mask[iy1:iy2, ix1:ix2]
+            
+            if mask_region.size == 0:
+                continue
+            
+            # Calculate what fraction of detection overlaps with roof
+            roof_pixels = np.sum(mask_region > 0)
+            overlap_pct = roof_pixels / det_area
+            
+            if overlap_pct < min_roof_overlap_pct:
+                continue
+        
+        filtered.append(det)
+    
+    return filtered
+
+
 def _nms(boxes: "np.ndarray", scores: "np.ndarray", iou_threshold: float) -> List[int]:
     """
     Basic NMS implementation for CPU inference.
@@ -113,9 +271,18 @@ def run_yolo_inference(
     class_names: Optional[List[str]] = None,
     conf_threshold: float = 0.3,
     iou_threshold: float = 0.45,
+    filter_by_roof: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Execute YOLO (ONNX) inference and return normalized damage detections.
+    
+    Args:
+        image_bytes: Raw image bytes
+        session: ONNX inference session
+        class_names: Optional list of class names
+        conf_threshold: Minimum confidence threshold
+        iou_threshold: IoU threshold for NMS
+        filter_by_roof: If True, detect roof boundary and filter detections
     """
     _ensure_np_cv()
     nparr = np.frombuffer(image_bytes, np.uint8)
@@ -124,6 +291,11 @@ def run_yolo_inference(
         return []
 
     original_h, original_w = img.shape[:2]
+    
+    # Detect roof boundary for filtering
+    roof_mask = None
+    if filter_by_roof:
+        roof_mask = detect_roof_boundary(img)
     processed, ratio, dwdh = _letterbox(img, new_shape=session.get_inputs()[0].shape[-1])
     input_data = processed.transpose((2, 0, 1))  # CHW
     input_data = input_data.astype(np.float32) / 255.0
@@ -202,6 +374,18 @@ def run_yolo_inference(
             }
         )
 
+    # Filter detections by location (remove sky, edges, non-roof areas)
+    if filter_by_roof:
+        detections = filter_detections_by_location(
+            detections,
+            original_w,
+            original_h,
+            roof_mask=roof_mask,
+            top_margin_pct=0.12,  # Exclude top 12% (sky)
+            edge_margin_pct=0.03,  # Exclude 3% from edges
+            min_roof_overlap_pct=0.3,  # Detection must be 30% on roof
+        )
+
     return detections
 
 
@@ -211,10 +395,23 @@ def enrich_with_cv(
     min_area_missing: int = 400,
     min_area_discoloration: int = 600,
     min_area_underlayment: int = 300,
+    filter_by_roof: bool = True,
 ) -> List[Dict[str, Any]]:
     """
     Merge YOLO detections with CV heuristics for redundancy and recall.
+    Optionally filters all detections to roof-only regions.
     """
+    _ensure_np_cv()
+    
+    # Get image dimensions and roof mask for filtering
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        return detections
+    
+    img_h, img_w = img.shape[:2]
+    roof_mask = detect_roof_boundary(img) if filter_by_roof else None
+    
     cv_missing = detect_missing_shingles_cv(image_bytes, min_area=min_area_missing)
     merged = merge_damage_areas(detections, cv_missing, iou_threshold=0.35)
 
@@ -224,6 +421,18 @@ def enrich_with_cv(
     # Detect exposed underlayment (tan/brown patches - very common damage indicator)
     cv_underlayment = detect_exposed_underlayment_cv(image_bytes, min_area=min_area_underlayment)
     merged = merge_damage_areas(merged, cv_underlayment, iou_threshold=0.3)
+
+    # Filter all detections by location (remove sky, edges, non-roof areas)
+    if filter_by_roof:
+        merged = filter_detections_by_location(
+            merged,
+            img_w,
+            img_h,
+            roof_mask=roof_mask,
+            top_margin_pct=0.12,
+            edge_margin_pct=0.03,
+            min_roof_overlap_pct=0.3,
+        )
 
     return merged
 
@@ -291,5 +500,7 @@ __all__ = [
     "enrich_with_cv",
     "summarize_with_ai",
     "filter_large_damage_areas",
+    "detect_roof_boundary",
+    "filter_detections_by_location",
 ]
 
