@@ -57,7 +57,8 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
       setError(null);
       setUploading(true);
       try {
-        const uploadData: UploadResponse = await getUploadUrl(userId);
+        // Pass actual file type to ensure presigned URL signature matches
+        const uploadData: UploadResponse = await getUploadUrl(userId, file.type || 'image/jpeg');
         let finalPhotoId = uploadData.photo_id;
         let finalS3Key = uploadData.s3_key;
 

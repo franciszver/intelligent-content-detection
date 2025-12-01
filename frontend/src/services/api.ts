@@ -21,10 +21,10 @@ const api = axios.create({
 /**
  * Get presigned URL for photo upload
  */
-export async function getUploadUrl(userId?: string): Promise<UploadResponse> {
+export async function getUploadUrl(userId?: string, contentType: string = 'image/jpeg'): Promise<UploadResponse> {
   const response = await api.post<UploadResponse>('/photos/upload', {
     user_id: userId,
-    content_type: 'image/jpeg',
+    content_type: contentType,
   });
   return response.data;
 }

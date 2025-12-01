@@ -17,7 +17,8 @@ def generate_presigned_url(
     bucket_name: str,
     object_key: str,
     expiration: int = 3600,
-    region: str = 'us-east-2'
+    region: str = 'us-east-2',
+    content_type: str = 'image/jpeg'
 ) -> Optional[str]:
     """
     Generate a presigned URL for S3 upload
@@ -27,6 +28,7 @@ def generate_presigned_url(
         object_key: S3 object key
         expiration: URL expiration time in seconds
         region: AWS region
+        content_type: Content type for the upload
         
     Returns:
         Presigned URL or None if error
@@ -38,7 +40,7 @@ def generate_presigned_url(
             Params={
                 'Bucket': bucket_name,
                 'Key': object_key,
-                'ContentType': 'image/jpeg'
+                'ContentType': content_type
             },
             ExpiresIn=expiration
         )

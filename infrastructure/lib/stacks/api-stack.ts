@@ -193,7 +193,7 @@ export class ApiStack extends cdk.Stack {
     );
     this.singleAgentFunction = new lambda.DockerImageFunction(this, 'SingleAgentFunction', {
       code: lambda.DockerImageCode.fromEcr(singleAgentRepo, {
-        tagOrDigest: 'v20251130-193859',
+        tagOrDigest: 'v20251130-200630',
       }),
       memorySize: 1536,
       timeout: cdk.Duration.seconds(180),
@@ -220,7 +220,15 @@ export class ApiStack extends cdk.Stack {
     });
 
     // Grant SingleAgentFunction permission to invoke itself (for async processing)
-    this.singleAgentFunction.grantInvoke(this.singleAgentFunction);
+    // Using addToRolePolicy with a pattern to avoid circular dependency
+    this.singleAgentFunction.addToRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['lambda:InvokeFunction'],
+        resources: [
+          `arn:aws:lambda:${this.region}:${this.account}:function:*SingleAgentFunction*`,
+        ],
+      })
+    );
 
     this.singleAgentResultsFunction = new lambda.Function(this, 'SingleAgentResultsFunction', {
       runtime: lambda.Runtime.PYTHON_3_11,
@@ -269,6 +277,9 @@ export class ApiStack extends cdk.Stack {
 
   }
 }
+
+
+
 
 
 

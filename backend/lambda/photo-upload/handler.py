@@ -123,7 +123,8 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             bucket_name=bucket_name,
             object_key=s3_key,
             expiration=3600,
-            region=region
+            region=region,
+            content_type=content_type
         )
         
         if not upload_url:
