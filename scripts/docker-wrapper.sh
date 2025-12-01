@@ -5,11 +5,11 @@ CMD="${1:-}"
 shift || true
 
 if [[ "${CMD}" == "build" ]]; then
-  export DOCKER_DEFAULT_PLATFORM=linux/amd64
-  export BUILDX_NO_DEFAULT_ATTESTATIONS=1
-  # Build with buildx but force Docker v2 manifest by loading through docker load
-  docker buildx build --platform=linux/amd64 --provenance=false --sbom=false "$@" --output=type=docker,dest=- | docker load
-  exit "${PIPESTATUS[0]}"
+  # Force classic Docker build (no BuildKit) to produce Docker V2 manifest Lambda requires
+  # Remove --platform flag if present to avoid BuildKit, CDK handles platform via Platform enum
+  export DOCKER_BUILDKIT=0
+  unset DOCKER_DEFAULT_PLATFORM
+  exec docker build "$@"
 else
   exec docker "${CMD}" "$@"
 fi

@@ -3,13 +3,15 @@ import * as apigateway from 'aws-cdk-lib/aws-apigateway';
 import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as path from 'path';
-import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import { Construct } from 'constructs';
 import { CONFIG } from '../config';
 import { StorageStack } from './storage-stack';
 import { SecretsStack } from './secrets-stack';
 
+// Set Docker wrapper globally for all CDK Docker operations
+// This ensures Lambda-compatible Docker V2 manifest format
 const dockerWrapperPath = path.resolve(
   __dirname,
   '..',
@@ -19,29 +21,11 @@ const dockerWrapperPath = path.resolve(
   process.platform === 'win32' ? 'docker-wrapper.cmd' : 'docker-wrapper.sh',
 );
 
-const withDockerWrapper = <T>(callback: () => T): T => {
-  const previousDocker = process.env.CDK_DOCKER;
-  const previousPlatform = process.env.DOCKER_DEFAULT_PLATFORM;
-
+// Set CDK_DOCKER globally so CDK uses our wrapper for all Docker operations
+if (!process.env.CDK_DOCKER) {
   process.env.CDK_DOCKER = dockerWrapperPath;
-  process.env.DOCKER_DEFAULT_PLATFORM = 'linux/amd64';
-
-  try {
-    return callback();
-  } finally {
-    if (previousDocker === undefined) {
-      delete process.env.CDK_DOCKER;
-    } else {
-      process.env.CDK_DOCKER = previousDocker;
-    }
-
-    if (previousPlatform === undefined) {
-      delete process.env.DOCKER_DEFAULT_PLATFORM;
-    } else {
-      process.env.DOCKER_DEFAULT_PLATFORM = previousPlatform;
-    }
-  }
-};
+  console.log(`[ApiStack] Set CDK_DOCKER=${dockerWrapperPath}`);
+}
 
 export class ApiStack extends cdk.Stack {
   public readonly api: apigateway.RestApi;
@@ -210,39 +194,40 @@ export class ApiStack extends cdk.Stack {
     });
 
     // Single Agent Lambda (YOLO + GPT) - packaged as a Docker image to avoid Lambda zip size limits
-    // Build context is backend/ so Dockerfile can access both lambda/agent-single and shared/
-    // CDK_DOCKER is set globally above to use docker-wrapper script for Lambda-compatible builds
-    this.singleAgentFunction = withDockerWrapper(
-      () =>
-        new lambda.DockerImageFunction(this, 'SingleAgentFunction', {
-          code: lambda.DockerImageCode.fromImageAsset(backendRoot, {
-            file: 'lambda/agent-single/Dockerfile',
-            platform: Platform.LINUX_AMD64, // Lambda requires linux/amd64 architecture
-          }),
-          memorySize: 1536,
-          timeout: cdk.Duration.seconds(180),
-          role: sharedLambdaRole,
-          environment: {
-            S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
-            DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
-            OPENAI_SECRET_NAME: CONFIG.SECRETS.OPENAI_API_KEY,
-            OPENROUTER_SECRET_NAME: CONFIG.SECRETS.OPENROUTER_API_KEY,
-            REGION: CONFIG.REGION,
-            MODEL_BUCKET_NAME: storageStack.photosBucket.bucketName,
-            YOLO_MODEL_KEY: 'models/yolov8s-roof.onnx',
-            YOLO_CLASS_NAMES: JSON.stringify([
-              'missing_shingles',
-              'cracks',
-              'hail_impact',
-              'granule_loss',
-              'discoloration',
-            ]),
-            SINGLE_AGENT_MODEL_VERSION: 'single-agent-v1',
-            SINGLE_AGENT_OVERLAY_PREFIX: 'single-agent/overlays',
-            SINGLE_AGENT_REPORT_PREFIX: 'single-agent/reports',
-          },
-        }),
+    // Using pre-built image from ECR to ensure Docker V2 manifest format Lambda requires
+    // To rebuild: cd backend && DOCKER_BUILDKIT=0 docker build --platform linux/amd64 -f lambda/agent-single/Dockerfile -t {ACCOUNT_ID}.dkr.ecr.us-east-2.amazonaws.com/intelligent-content-detection-single-agent:v2 . && docker push ...
+    const singleAgentRepo = ecr.Repository.fromRepositoryName(
+      this,
+      'SingleAgentRepo',
+      'intelligent-content-detection-single-agent',
     );
+    this.singleAgentFunction = new lambda.DockerImageFunction(this, 'SingleAgentFunction', {
+      code: lambda.DockerImageCode.fromEcr(singleAgentRepo, {
+        tagOrDigest: 'v20251130-181851',
+      }),
+      memorySize: 1536,
+      timeout: cdk.Duration.seconds(180),
+      role: sharedLambdaRole,
+      environment: {
+        S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
+        DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
+        OPENAI_SECRET_NAME: CONFIG.SECRETS.OPENAI_API_KEY,
+        OPENROUTER_SECRET_NAME: CONFIG.SECRETS.OPENROUTER_API_KEY,
+        REGION: CONFIG.REGION,
+        MODEL_BUCKET_NAME: storageStack.photosBucket.bucketName,
+        YOLO_MODEL_KEY: 'models/yolov8s-roof.onnx',
+        YOLO_CLASS_NAMES: JSON.stringify([
+          'missing_shingles',
+          'cracks',
+          'hail_impact',
+          'granule_loss',
+          'discoloration',
+        ]),
+        SINGLE_AGENT_MODEL_VERSION: 'single-agent-v1',
+        SINGLE_AGENT_OVERLAY_PREFIX: 'single-agent/overlays',
+        SINGLE_AGENT_REPORT_PREFIX: 'single-agent/reports',
+      },
+    });
 
     this.singleAgentResultsFunction = new lambda.Function(this, 'SingleAgentResultsFunction', {
       runtime: lambda.Runtime.PYTHON_3_11,
@@ -291,4 +276,5 @@ export class ApiStack extends cdk.Stack {
 
   }
 }
+
 
