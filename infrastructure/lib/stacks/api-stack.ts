@@ -75,9 +75,10 @@ export class ApiStack extends cdk.Stack {
       },
       deployOptions: {
         stageName: 'prod',
-        loggingLevel: apigateway.MethodLoggingLevel.INFO,
-        dataTraceEnabled: true,
+        loggingLevel: apigateway.MethodLoggingLevel.OFF, // Disable logging to avoid extra IAM roles
+        dataTraceEnabled: false,
       },
+      cloudWatchRole: false, // Prevent API Gateway from creating its own CloudWatch role
     });
 
     const backendRoot = path.join(__dirname, '../../../backend');
@@ -157,9 +158,6 @@ export class ApiStack extends cdk.Stack {
         },
       });
 
-    // Lambda Log Groups with 7-day retention
-    const logRetention = logs.RetentionDays.ONE_WEEK;
-
     // Re-use existing IAM role to stay within IAM quotas
     // Default to the reusable role we created: intelligent-content-detection-lambda-role
     const existingLambdaRoleArn =
@@ -189,7 +187,6 @@ export class ApiStack extends cdk.Stack {
       memorySize: CONFIG.LAMBDA.PHOTO_UPLOAD.MEMORY,
       timeout: cdk.Duration.seconds(CONFIG.LAMBDA.PHOTO_UPLOAD.TIMEOUT),
       role: sharedLambdaRole,
-      logRetention,
       environment: {
         S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
         DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
@@ -205,7 +202,6 @@ export class ApiStack extends cdk.Stack {
       memorySize: CONFIG.LAMBDA.METADATA_QUERY.MEMORY,
       timeout: cdk.Duration.seconds(CONFIG.LAMBDA.METADATA_QUERY.TIMEOUT),
       role: sharedLambdaRole,
-      logRetention,
       environment: {
         DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
         REGION: CONFIG.REGION,
@@ -225,7 +221,6 @@ export class ApiStack extends cdk.Stack {
           memorySize: 1536,
           timeout: cdk.Duration.seconds(180),
           role: sharedLambdaRole,
-          logRetention,
           environment: {
             S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
             DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
@@ -255,7 +250,6 @@ export class ApiStack extends cdk.Stack {
       memorySize: 256,
       timeout: cdk.Duration.seconds(15),
       role: sharedLambdaRole,
-      logRetention,
       environment: {
         DYNAMODB_TABLE_NAME: storageStack.metadataTable.tableName,
         S3_BUCKET_NAME: storageStack.photosBucket.bucketName,
