@@ -4,7 +4,6 @@ Utilities that power the best-effort single-agent pipeline (YOLO + CV + GPT).
 from __future__ import annotations
 
 import json
-import os
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .cv_utils import (

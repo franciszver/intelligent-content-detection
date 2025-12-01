@@ -1,5 +1,5 @@
 /**
- * Photo upload component with drag-and-drop
+ * Photo upload component with drag-and-drop (dark theme)
  */
 import { useCallback, useState } from 'react';
 
@@ -46,11 +46,15 @@ export function PhotoUpload({ onFileSelect, disabled }: PhotoUploadProps) {
 
   return (
     <div
-      className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-        isDragging
-          ? 'border-blue-500 bg-blue-50'
-          : 'border-gray-300 bg-gray-50'
-      } ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+      className={`
+        relative border-2 border-dashed rounded-2xl p-12 text-center transition-all duration-300
+        ${isDragging
+          ? 'border-cyan-400 bg-cyan-500/10 scale-[1.02]'
+          : 'border-slate-600 bg-slate-800/50 hover:border-slate-500 hover:bg-slate-800/70'
+        }
+        ${disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+        backdrop-blur
+      `}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
@@ -65,29 +69,64 @@ export function PhotoUpload({ onFileSelect, disabled }: PhotoUploadProps) {
       />
       <label
         htmlFor="photo-upload-input"
-        className="cursor-pointer"
+        className={`block ${disabled ? 'cursor-not-allowed' : 'cursor-pointer'}`}
       >
-        <svg
-          className="mx-auto h-12 w-12 text-gray-400"
-          stroke="currentColor"
-          fill="none"
-          viewBox="0 0 48 48"
-        >
-          <path
-            d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
-            strokeWidth={2}
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-        <p className="mt-2 text-sm text-gray-600">
-          <span className="font-semibold">Click to upload</span> or drag and drop
+        {/* Upload Icon */}
+        <div className={`
+          mx-auto w-20 h-20 rounded-full flex items-center justify-center mb-6
+          transition-all duration-300
+          ${isDragging 
+            ? 'bg-cyan-500/20 scale-110' 
+            : 'bg-slate-700/50'
+          }
+        `}>
+          <svg
+            className={`w-10 h-10 transition-colors duration-300 ${
+              isDragging ? 'text-cyan-400' : 'text-slate-400'
+            }`}
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={1.5}
+              d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+            />
+          </svg>
+        </div>
+
+        {/* Text */}
+        <p className="text-lg text-white font-medium mb-2">
+          {isDragging ? 'Drop your image here' : 'Drop your roof photo here'}
         </p>
-        <p className="mt-1 text-xs text-gray-500">
-          PNG, JPG, JPEG up to 10MB
+        <p className="text-slate-400 mb-4">
+          or <span className="text-cyan-400 hover:text-cyan-300 transition-colors">browse files</span>
         </p>
+        
+        {/* File info */}
+        <div className="flex items-center justify-center gap-4 text-xs text-slate-500">
+          <span className="flex items-center gap-1">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            PNG, JPG, JPEG
+          </span>
+          <span className="flex items-center gap-1">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4" />
+            </svg>
+            Max 10MB
+          </span>
+        </div>
       </label>
+
+      {/* Decorative corners */}
+      <div className="absolute top-4 left-4 w-4 h-4 border-t-2 border-l-2 border-slate-600 rounded-tl-lg"></div>
+      <div className="absolute top-4 right-4 w-4 h-4 border-t-2 border-r-2 border-slate-600 rounded-tr-lg"></div>
+      <div className="absolute bottom-4 left-4 w-4 h-4 border-b-2 border-l-2 border-slate-600 rounded-bl-lg"></div>
+      <div className="absolute bottom-4 right-4 w-4 h-4 border-b-2 border-r-2 border-slate-600 rounded-br-lg"></div>
     </div>
   );
 }
-
