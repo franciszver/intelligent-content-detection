@@ -221,7 +221,6 @@ def detect_dark_patches_cv(image_bytes: bytes, min_area: int = 250) -> List[Dict
 
     # Use adaptive thresholding on grayscale to find locally dark regions
     # This helps find dark patches relative to surrounding shingles
-    blur = cv2.GaussianBlur(gray, (21, 21), 0)
     adaptive_dark = cv2.adaptiveThreshold(
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 31, 15
     )
@@ -274,6 +273,131 @@ def detect_dark_patches_cv(image_bytes: bytes, min_area: int = 250) -> List[Dict
         })
 
     return results
+
+
+def detect_damage_with_gpt(
+    image_bytes: bytes,
+    ai_client: Optional[Any],
+    image_width: int,
+    image_height: int,
+) -> List[Dict[str, Any]]:
+    """
+    Use GPT-4 Vision to detect roof damage with bounding boxes.
+    More accurate than YOLO/CV but slower and costs per call.
+    
+    Args:
+        image_bytes: Raw image bytes
+        ai_client: AIClient instance
+        image_width: Image width in pixels
+        image_height: Image height in pixels
+    
+    Returns:
+        List of detections with bbox, confidence, damage_type
+    """
+    if not ai_client:
+        return []
+
+    prompt = f"""You are an expert roof damage inspector analyzing an aerial/ground photo of a roof.
+
+TASK: Identify ALL areas of roof damage and provide precise bounding box coordinates.
+
+IMAGE DIMENSIONS: {image_width}x{image_height} pixels
+
+DAMAGE TYPES TO DETECT:
+- missing_shingles: Dark gaps, exposed underlayment, bare spots where shingles are gone
+- damaged_shingles: Cracked, curled, lifted, or broken shingles
+- hail_impact: Circular dents, bruising, granule loss patterns
+- discoloration: Stains, algae growth, rust streaks, water damage marks
+- exposed_underlayment: Visible tar paper, felt paper, or decking (often dark or tan colored)
+
+INSTRUCTIONS:
+1. Scan the ENTIRE image systematically
+2. Mark EVERY damaged area you can identify, even small ones
+3. Provide coordinates as [x1, y1, x2, y2] where (x1,y1) is top-left and (x2,y2) is bottom-right
+4. Coordinates must be in pixels within the image bounds (0 to {image_width} for x, 0 to {image_height} for y)
+5. Assign confidence 0.0-1.0 based on how certain you are
+
+Return ONLY valid JSON in this exact format:
+{{
+  "detections": [
+    {{
+      "bbox": [x1, y1, x2, y2],
+      "damage_type": "missing_shingles",
+      "confidence": 0.85,
+      "description": "brief description of damage"
+    }}
+  ]
+}}
+
+If no damage is found, return: {{"detections": []}}"""
+
+    try:
+        result, provider = ai_client.detect_content(image_bytes, prompt)
+        
+        if not result or "detections" not in result:
+            print(f"[GPT Detection] No valid response from {provider}")
+            return []
+        
+        detections = []
+        for det in result.get("detections", []):
+            bbox = det.get("bbox", [])
+            if len(bbox) != 4:
+                continue
+            
+            # Validate and clamp coordinates (handle non-numeric values)
+            try:
+                x1, y1, x2, y2 = bbox
+                x1 = max(0, min(image_width - 1, int(float(x1))))
+                y1 = max(0, min(image_height - 1, int(float(y1))))
+                x2 = max(x1 + 1, min(image_width, int(float(x2))))
+                y2 = max(y1 + 1, min(image_height, int(float(y2))))
+            except (ValueError, TypeError):
+                # Skip if coordinates can't be converted to numbers
+                continue
+            
+            # Skip tiny detections (likely errors)
+            if (x2 - x1) < 10 or (y2 - y1) < 10:
+                continue
+            
+            damage_type = det.get("damage_type", "unknown")
+            # Ensure damage_type is a string before normalizing
+            if not isinstance(damage_type, str):
+                damage_type = str(damage_type) if damage_type else "unknown"
+            
+            # Normalize damage type names
+            damage_type_map = {
+                "missing_shingles": "missing_shingles",
+                "damaged_shingles": "damaged_shingles",
+                "hail_impact": "hail_impact",
+                "discoloration": "discoloration",
+                "exposed_underlayment": "exposed_underlayment",
+                "water_damage": "discoloration",
+                "algae": "discoloration",
+                "crack": "damaged_shingles",
+                "cracks": "damaged_shingles",
+            }
+            damage_type = damage_type_map.get(damage_type.lower(), damage_type)
+            
+            try:
+                confidence = float(det.get("confidence", 0.7))
+            except (ValueError, TypeError):
+                confidence = 0.7
+            confidence = max(0.0, min(1.0, confidence))
+            
+            detections.append({
+                "bbox": [x1, y1, x2, y2],
+                "damage_type": damage_type,
+                "confidence": confidence,
+                "source": "gpt_vision",
+                "description": det.get("description", ""),
+            })
+        
+        print(f"[GPT Detection] Found {len(detections)} damage areas via {provider}")
+        return detections
+        
+    except Exception as e:
+        print(f"[GPT Detection] Error: {e}")
+        return []
 
 
 def detect_discoloration_cv(image_bytes: bytes, min_area: int = 600) -> List[Dict[str, Any]]:
@@ -351,9 +475,11 @@ Return ONLY JSON:
 }}
 """
 
-    updated = {tuple(area["bbox"]): area for area in damage_areas if "bbox" in area}
+    # Filter to only include areas with valid bbox
+    areas_with_bbox = [area for area in damage_areas if "bbox" in area and len(area["bbox"]) == 4]
+    updated = {tuple(area["bbox"]): area for area in areas_with_bbox}
 
-    for chunk in _chunk_damage_areas(damage_areas):
+    for chunk in _chunk_damage_areas(areas_with_bbox):
         boxes_json = json.dumps([area["bbox"] for area in chunk])
         prompt = prompt_template.format(task=task, boxes=boxes_json)
         result, provider = ai_client.detect_content(image_bytes, prompt)

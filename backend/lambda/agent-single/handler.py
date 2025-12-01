@@ -28,6 +28,8 @@ from shared.cv_utils import (
     generate_overlay,
     count_damage_instances,
     filter_large_damage_areas,
+    detect_damage_with_gpt,
+    merge_damage_areas,
 )  # type: ignore
 from shared.single_agent import (
     run_yolo_inference,
@@ -255,14 +257,37 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         damage_areas = enrich_with_cv(image_bytes, yolo_detections)
         print(f"[SingleAgent] After CV merge: {len(damage_areas)} detections")
 
-        # Refine via GPT classification and metadata
-        if damage_areas:
-            damage_areas = annotate_damage_with_ai(
+        # GPT-4 Vision detection (most accurate, finds what YOLO/CV miss)
+        use_gpt_detection = os.environ.get("USE_GPT_DETECTION", "true").lower() == "true"
+        if use_gpt_detection:
+            gpt_detections = detect_damage_with_gpt(
                 image_bytes,
-                damage_areas,
+                ai_client,
+                image_width,
+                image_height,
+            )
+            print(f"[SingleAgent] GPT Vision detections: {len(gpt_detections)}")
+            
+            # Merge GPT detections with existing (GPT typically higher quality)
+            damage_areas = merge_damage_areas(damage_areas, gpt_detections, iou_threshold=0.3)
+            print(f"[SingleAgent] After GPT merge: {len(damage_areas)} detections")
+
+        # Refine via GPT classification and metadata (only for non-GPT detections)
+        non_gpt_areas = [d for d in damage_areas if d.get("source") != "gpt_vision"]
+        if non_gpt_areas:
+            annotated = annotate_damage_with_ai(
+                image_bytes,
+                non_gpt_areas,
                 ai_client,
                 task="missing shingles, torn shingles, hail impact, discoloration, structural cracks",
             )
+            # Update original list with annotated versions
+            annotated_map = {tuple(d["bbox"]): d for d in annotated if "bbox" in d and len(d["bbox"]) == 4}
+            for area in damage_areas:
+                if area.get("source") != "gpt_vision" and "bbox" in area and len(area["bbox"]) == 4:
+                    key = tuple(area["bbox"])
+                    if key in annotated_map:
+                        area.update(annotated_map[key])
 
         damage_areas = filter_large_damage_areas(damage_areas, image_width, image_height)
 
