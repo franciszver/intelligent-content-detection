@@ -160,19 +160,18 @@ export class ApiStack extends cdk.Stack {
     // Lambda Log Groups with 7-day retention
     const logRetention = logs.RetentionDays.ONE_WEEK;
 
-    // Re-use existing IAM role if provided to stay within IAM quotas
+    // Re-use existing IAM role to stay within IAM quotas
+    // Default to the reusable role we created: intelligent-content-detection-lambda-role
     const existingLambdaRoleArn =
-      process.env.EXISTING_LAMBDA_ROLE_ARN || this.node.tryGetContext('existingLambdaRoleArn');
+      process.env.EXISTING_LAMBDA_ROLE_ARN ||
+      this.node.tryGetContext('existingLambdaRoleArn') ||
+      `arn:aws:iam::${this.account}:role/intelligent-content-detection-lambda-role`;
 
-    const sharedLambdaRole: iam.IRole = existingLambdaRoleArn
-      ? iam.Role.fromRoleArn(this, 'SharedLambdaRole', existingLambdaRoleArn)
-      : new iam.Role(this, 'SharedLambdaRole', {
-        assumedBy: new iam.ServicePrincipal('lambda.amazonaws.com'),
-        managedPolicies: [
-          iam.ManagedPolicy.fromAwsManagedPolicyName('service-role/AWSLambdaBasicExecutionRole'),
-        ],
-        description: 'Shared IAM role for all Lambda functions in the API stack',
-      });
+    const sharedLambdaRole: iam.IRole = iam.Role.fromRoleArn(
+      this,
+      'SharedLambdaRole',
+      existingLambdaRoleArn
+    );
 
     // Grant permissions to shared role
     storageStack.photosBucket.grantReadWrite(sharedLambdaRole);
