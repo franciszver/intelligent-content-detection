@@ -77,8 +77,9 @@ export interface UploadResponse {
 export interface DetectionResponse {
   photo_id: string;
   status: string;
-  detections: Detection[];
-  materials: Material[];
+  message?: string; // For async processing response (202 Accepted)
+  detections?: Detection[];
+  materials?: Material[];
   processing_time_ms?: number;
   ai_provider?: string;
   single_agent_results?: SingleAgentResult;

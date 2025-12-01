@@ -28,12 +28,14 @@ export function usePhotoDetection(): UsePhotoDetectionReturn {
 
         // Poll for metadata until status is 'completed' or 'failed'
         // This ensures we get the full results including single_agent_results
+        // Lambda can take up to 60 seconds, so poll for up to 90 seconds
         let attempts = 0;
-        const maxAttempts = 10;
+        const maxAttempts = 30; // 30 attempts * 3 seconds = 90 seconds max
+        const pollInterval = 3000; // 3 seconds between polls
         let latest = await getPhotoMetadata(photoId);
 
-        while (latest.status === 'processing' && attempts < maxAttempts) {
-          await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        while ((latest.status === 'processing' || latest.status === 'pending') && attempts < maxAttempts) {
+          await new Promise(resolve => setTimeout(resolve, pollInterval));
           latest = await getPhotoMetadata(photoId);
           attempts++;
         }

@@ -126,6 +126,18 @@ def _mark_metadata_failed(table: str, region: str, photo_id: Optional[str]) -> N
         print(f"[SingleAgent] Failed to update metadata for {photo_id}: {error}")
 
 
+def _invoke_async(function_name: str, payload: Dict[str, Any], region: str) -> None:
+    """Invoke Lambda function asynchronously."""
+    import boto3
+    client = boto3.client("lambda", region_name=region)
+    client.invoke(
+        FunctionName=function_name,
+        InvocationType="Event",  # Async invocation
+        Payload=json.dumps(payload).encode("utf-8"),
+    )
+    print(f"[SingleAgent] Async invocation triggered for {payload.get('photo_id')}")
+
+
 def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     """
     Event shape:
@@ -133,8 +145,12 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         "photo_id": "...",
         "s3_key": "...",
         "user_id": "...",
-        "workflow_id": "..." (optional)
+        "workflow_id": "..." (optional),
+        "_async_processing": true (internal flag for async processing)
     }
+    
+    For API Gateway requests, this handler returns immediately with 202 Accepted
+    and invokes itself asynchronously to do the actual processing.
     """
     start_time = time.time()
     bucket_name = os.environ.get("S3_BUCKET_NAME")
@@ -153,6 +169,54 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     photo_id = payload["photo_id"]
     s3_key = payload["s3_key"]
     user_id = payload.get("user_id")
+    
+    # Check if this is an async processing invocation (not from API Gateway)
+    is_async_processing = event.get("_async_processing", False)
+
+    # For API Gateway requests, return immediately and process asynchronously
+    if is_api_event and not is_async_processing:
+        print(f"[SingleAgent] API request received for {photo_id}, triggering async processing")
+        
+        # Update status to "processing" in DynamoDB
+        try:
+            metadata = get_metadata(table_name, photo_id, region)
+            if metadata:
+                metadata.status = "processing"
+                put_metadata(table_name, metadata, region)
+            else:
+                # Create initial metadata if it doesn't exist
+                metadata = PhotoMetadata(
+                    photo_id=photo_id,
+                    timestamp=time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    s3_key=s3_key,
+                    status="processing",
+                )
+                put_metadata(table_name, metadata, region)
+        except Exception as e:
+            print(f"[SingleAgent] Warning: Could not update metadata status: {e}")
+        
+        # Invoke self asynchronously
+        async_payload = {
+            "photo_id": photo_id,
+            "s3_key": s3_key,
+            "user_id": user_id,
+            "_async_processing": True,
+        }
+        _invoke_async(context.function_name, async_payload, region)
+        
+        # Return 202 Accepted immediately
+        return {
+            "statusCode": 202,
+            "headers": {
+                "Content-Type": "application/json",
+                "Access-Control-Allow-Origin": "*",
+            },
+            "body": json.dumps({
+                "photo_id": photo_id,
+                "status": "processing",
+                "message": "Analysis started. Poll /photos/{photoId}/metadata for results.",
+            }),
+        }
 
     print(f"[SingleAgent] Starting analysis for {photo_id} ({s3_key})")
 
