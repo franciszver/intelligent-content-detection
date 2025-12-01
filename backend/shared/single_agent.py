@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from .cv_utils import (
     count_damage_instances,
     detect_discoloration_cv,
+    detect_exposed_underlayment_cv,
     detect_missing_shingles_cv,
     merge_damage_areas,
     filter_large_damage_areas,
@@ -197,6 +198,7 @@ def enrich_with_cv(
     detections: List[Dict[str, Any]],
     min_area_missing: int = 400,
     min_area_discoloration: int = 600,
+    min_area_underlayment: int = 300,
 ) -> List[Dict[str, Any]]:
     """
     Merge YOLO detections with CV heuristics for redundancy and recall.
@@ -206,6 +208,11 @@ def enrich_with_cv(
 
     cv_discoloration = detect_discoloration_cv(image_bytes, min_area=min_area_discoloration)
     merged = merge_damage_areas(merged, cv_discoloration, iou_threshold=0.3)
+
+    # Detect exposed underlayment (tan/brown patches - very common damage indicator)
+    cv_underlayment = detect_exposed_underlayment_cv(image_bytes, min_area=min_area_underlayment)
+    merged = merge_damage_areas(merged, cv_underlayment, iou_threshold=0.3)
+
     return merged
 
 

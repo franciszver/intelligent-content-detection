@@ -10,22 +10,12 @@ import { CONFIG } from '../config';
 import { StorageStack } from './storage-stack';
 import { SecretsStack } from './secrets-stack';
 
-// Set Docker wrapper globally for all CDK Docker operations
-// This ensures Lambda-compatible Docker V2 manifest format
-const dockerWrapperPath = path.resolve(
-  __dirname,
-  '..',
-  '..',
-  '..',
-  'scripts',
-  process.platform === 'win32' ? 'docker-wrapper.cmd' : 'docker-wrapper.sh',
-);
-
-// Set CDK_DOCKER globally so CDK uses our wrapper for all Docker operations
-if (!process.env.CDK_DOCKER) {
-  process.env.CDK_DOCKER = dockerWrapperPath;
-  console.log(`[ApiStack] Set CDK_DOCKER=${dockerWrapperPath}`);
-}
+// Docker wrapper path for custom builds (not currently used since SingleAgentFunction uses pre-built ECR image)
+// const dockerWrapperPath = path.resolve(
+//   __dirname, '..', '..', '..', 'scripts',
+//   process.platform === 'win32' ? 'docker-wrapper.cmd' : 'docker-wrapper.sh',
+// );
+// Note: CDK_DOCKER is NOT set globally to avoid interfering with layer bundling
 
 export class ApiStack extends cdk.Stack {
   public readonly api: apigateway.RestApi;
@@ -203,7 +193,7 @@ export class ApiStack extends cdk.Stack {
     );
     this.singleAgentFunction = new lambda.DockerImageFunction(this, 'SingleAgentFunction', {
       code: lambda.DockerImageCode.fromEcr(singleAgentRepo, {
-        tagOrDigest: 'v20251130-181851',
+        tagOrDigest: 'v20251201-024800',
       }),
       memorySize: 1536,
       timeout: cdk.Duration.seconds(180),

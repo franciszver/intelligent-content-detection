@@ -4,6 +4,7 @@ Lambda handler for the Single Agent (YOLO + CV + GPT) damage pipeline.
 import json
 import os
 import time
+import traceback
 from typing import Any, Dict, Optional, Tuple
 import sys
 
@@ -306,6 +307,9 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
 
         return _build_response(response_payload, is_api_event)
     except Exception as exc:
+        error_traceback = traceback.format_exc()
+        print(f"[SingleAgent] Error processing {photo_id}: {exc}")
+        print(f"[SingleAgent] Traceback:\n{error_traceback}")
         _mark_metadata_failed(table_name, region, photo_id)
         if is_api_event:
             return {
@@ -314,7 +318,7 @@ def handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                     "Content-Type": "application/json",
                     "Access-Control-Allow-Origin": "*",
                 },
-                "body": json.dumps({"error": str(exc)}),
+                "body": json.dumps({"error": str(exc), "traceback": error_traceback}),
             }
         raise
 

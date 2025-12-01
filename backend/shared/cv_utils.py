@@ -117,6 +117,71 @@ def detect_missing_shingles_cv(image_bytes: bytes, min_area: int = 400) -> List[
     return results
 
 
+def detect_exposed_underlayment_cv(image_bytes: bytes, min_area: int = 300) -> List[Dict[str, Any]]:
+    """
+    Detect exposed underlayment (tan/brown patches) which indicate missing shingles.
+    Uses HSV color range detection for tan/brown/beige colors.
+    """
+    _ensure_cv2_available()
+    _ensure_numpy_available()
+
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if img is None:
+        return []
+
+    height, width = img.shape[:2]
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    # Tan/brown/beige color ranges (exposed underlayment, plywood, tar paper)
+    # Range 1: Light tan/beige
+    lower_tan1 = np.array([10, 30, 100])
+    upper_tan1 = np.array([25, 150, 230])
+    mask1 = cv2.inRange(hsv, lower_tan1, upper_tan1)
+
+    # Range 2: Darker brown/tan
+    lower_tan2 = np.array([8, 50, 80])
+    upper_tan2 = np.array([20, 180, 200])
+    mask2 = cv2.inRange(hsv, lower_tan2, upper_tan2)
+
+    # Range 3: Orange-ish brown (rusted/weathered)
+    lower_orange = np.array([5, 80, 100])
+    upper_orange = np.array([15, 200, 220])
+    mask3 = cv2.inRange(hsv, lower_orange, upper_orange)
+
+    # Combine all masks
+    mask = cv2.bitwise_or(mask1, mask2)
+    mask = cv2.bitwise_or(mask, mask3)
+
+    # Morphological operations to clean up
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (7, 7))
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=2)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    results: List[Dict[str, Any]] = []
+
+    for contour in contours:
+        area = cv2.contourArea(contour)
+        if area < min_area:
+            continue
+
+        x, y, w, h = cv2.boundingRect(contour)
+        bbox = _clamp_bbox([x, y, x + w, y + h], width, height)
+
+        # Higher confidence for larger patches (more likely real damage)
+        confidence = float(min(0.92, 0.5 + (area / (width * height)) * 8))
+
+        results.append({
+            "bbox": bbox,
+            "confidence": confidence,
+            "damage_type": "exposed_underlayment",
+            "source": "cv_color"
+        })
+
+    return results
+
+
 def detect_discoloration_cv(image_bytes: bytes, min_area: int = 600) -> List[Dict[str, Any]]:
     """Detect discoloration or staining using LAB color analysis."""
     _ensure_cv2_available()
