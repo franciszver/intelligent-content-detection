@@ -10,6 +10,15 @@ import { CONFIG } from '../config';
 import { StorageStack } from './storage-stack';
 import { SecretsStack } from './secrets-stack';
 
+// Ensure Docker builds produce linux/amd64 images using Docker V2 schema (lambda requirement)
+if (!process.env.DOCKER_DEFAULT_PLATFORM) {
+  process.env.DOCKER_DEFAULT_PLATFORM = 'linux/amd64';
+}
+if (!process.env.CDK_DOCKER) {
+  const dockerWrapper = path.resolve(__dirname, '..', '..', '..', 'scripts', process.platform === 'win32' ? 'docker-wrapper.cmd' : 'docker-wrapper.sh');
+  process.env.CDK_DOCKER = dockerWrapper;
+}
+
 export class ApiStack extends cdk.Stack {
   public readonly api: apigateway.RestApi;
   public readonly photoUploadFunction: lambda.Function;

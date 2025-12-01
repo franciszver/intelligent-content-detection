@@ -1,4 +1,5 @@
 FROM public.ecr.aws/lambda/python:3.11
+# Lambda-compatible container image (forcing rebuild v2)
 
 # Set working directory
 WORKDIR ${LAMBDA_TASK_ROOT}
